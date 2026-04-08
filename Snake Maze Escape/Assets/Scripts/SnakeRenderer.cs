@@ -5,32 +5,36 @@ using System.Collections.Generic;
 // its position data, its visual segments on the grid,
 // selection state, movement logic, and win detection
 // when the snake's head reaches its matching exit hole.
+// Cell size is read from GridManager at startup so the snake
+// always scales correctly regardless of difficulty tier.
 
 public class SnakeRenderer : MonoBehaviour
 {
     [Header("Snake Settings")]
-    public Color snakeColour = new Color(0.91f, 0.36f, 0.29f); // Coral red — unique per snake
-    public float cellSize = 1f; // Must match GridManager.cellSize
+    public Color snakeColour = new Color(0.91f, 0.36f, 0.29f); // Coral red
+
+    // Cell size read from GridManager at startup — never hardcoded
+    // Ensures snake segments always match the current grid scale
+    private float cellSize;
 
     // Ordered list of grid positions this snake occupies
     // Index 0 is always the head, last index is the tail
     private List<Vector2Int> cells = new List<Vector2Int>();
 
     // Matching list of SpriteRenderers — one per segment
-    // Kept in sync with cells so we can update colours without rebuilding
     private List<SpriteRenderer> segmentRenderers = new List<SpriteRenderer>();
 
     // Tracks whether this snake is currently selected by the player
     private bool isSelected = false;
 
-    // References to other managers set in Start()
+    // References to other managers — set in Start()
     private GridManager gridManager;
     private GameManager gameManager;
     private ExitHole exitHole;
 
     // Hardcoded starting positions for testing
-    // Head at (0,0), body extending right to (2,0)
-    // Will be replaced by JSON level loader in Step 7
+    // Head at (0,0), body extending right
+    // Will be replaced by JSON level loader in Step 8
     private List<Vector2Int> testSnakeCells = new List<Vector2Int>
     {
         new Vector2Int(0, 0), // head
@@ -42,9 +46,13 @@ public class SnakeRenderer : MonoBehaviour
     void Start()
     {
         // Cache references to other scripts in the scene
-        gridManager = FindFirstObjectByType<GridManager>();
-        gameManager = FindFirstObjectByType<GameManager>();
-        exitHole = FindFirstObjectByType<ExitHole>();
+        gridManager = FindAnyObjectByType<GridManager>();
+        gameManager = FindAnyObjectByType<GameManager>();
+        exitHole = FindAnyObjectByType<ExitHole>();
+
+        // Read cell size from GridManager so snake always matches grid scale
+        // This must happen before RenderSnake() uses cellSize
+        cellSize = gridManager.cellSize;
 
         // Initialise cell positions from test data
         cells = new List<Vector2Int>(testSnakeCells);
@@ -70,15 +78,17 @@ public class SnakeRenderer : MonoBehaviour
             GameObject seg = new GameObject($"Segment_{i}");
             seg.transform.parent = this.transform;
 
-            // Z position of -1 puts the snake in front of the grid cells (z = 0)
-            seg.transform.position = new Vector3(pos.x * cellSize, pos.y * cellSize, -1f);
+            // Z of -1 puts snake in front of grid cells (z=0)
+            seg.transform.position = new Vector3(
+                pos.x * cellSize, pos.y * cellSize, -1f);
 
             SpriteRenderer sr = seg.AddComponent<SpriteRenderer>();
             sr.sprite = CreateSquareSprite();
             sr.color = snakeColour;
 
-            // Segments are slightly smaller than cells so the grid shows through
-            seg.transform.localScale = new Vector3(cellSize * 0.85f, cellSize * 0.85f, 1f);
+            // Segments slightly smaller than cells so grid lines show through
+            seg.transform.localScale = new Vector3(
+                cellSize * 0.8f, cellSize * 0.8f, 1f);
 
             segmentRenderers.Add(sr);
         }
@@ -87,7 +97,7 @@ public class SnakeRenderer : MonoBehaviour
         UpdateSelectionVisual();
     }
 
-    // Updates segment colours to show selection state
+    // Updates segment colours to reflect selection state
     // When selected, the head segment lightens toward white
     void UpdateSelectionVisual()
     {
@@ -96,7 +106,7 @@ public class SnakeRenderer : MonoBehaviour
             if (segmentRenderers[i] == null) continue;
 
             if (isSelected && i == 0)
-                // Blend head colour 50% toward white as a selection indicator
+                // Blend head 50% toward white as selection indicator
                 segmentRenderers[i].color = Color.Lerp(snakeColour, Color.white, 0.5f);
             else
                 segmentRenderers[i].color = snakeColour;
@@ -124,14 +134,14 @@ public class SnakeRenderer : MonoBehaviour
     }
 
     // Moves the snake in a straight line toward (targetX, targetY)
-    // stopping as soon as it hits a wall, another snake, its own body,
-    // or the grid boundary. The snake slides one cell at a time
-    // until blocked — the player does not need to click each individual cell.
+    // stopping when it hits a wall, another snake, its own body,
+    // or the grid boundary. Snake slides automatically — player
+    // clicks the destination, not each individual cell.
     public void MoveAlongLine(int targetX, int targetY, GridManager gridManager)
     {
         Vector2Int head = cells[0];
 
-        // Calculate the step direction — only horizontal OR vertical, never diagonal
+        // Calculate step direction — horizontal OR vertical only, never diagonal
         int dx = 0, dy = 0;
         if (targetX != head.x) dx = (targetX > head.x) ? 1 : -1;
         if (targetY != head.y) dy = (targetY > head.y) ? 1 : -1;
@@ -147,19 +157,18 @@ public class SnakeRenderer : MonoBehaviour
             if (dx != 0 && ((dx > 0 && next.x > targetX) || (dx < 0 && next.x < targetX))) break;
             if (dy != 0 && ((dy > 0 && next.y > targetY) || (dy < 0 && next.y < targetY))) break;
 
-            // Stop at grid boundary or wall cell
+            // Stop at grid boundary or wall
             if (!gridManager.IsInBounds(next.x, next.y)) break;
             if (gridManager.GetCell(next.x, next.y) == GridManager.CellType.Wall) break;
 
-            // Stop if the next cell is part of own body
-            // We exclude the tail (last index) because it will vacate this frame
+            // Stop at own body — exclude tail since it vacates this frame
             bool selfBlock = false;
             for (int i = 0; i < cells.Count - 1; i++)
                 if (cells[i] == next) { selfBlock = true; break; }
             if (selfBlock) break;
 
-            // Stop if the next cell is occupied by a different snake
-            SnakeRenderer[] allSnakes = FindObjectsByType<SnakeRenderer>(FindObjectsSortMode.None);
+            // Stop at other snakes
+            SnakeRenderer[] allSnakes = FindObjectsByType<SnakeRenderer>(FindObjectsInactive.Exclude);
             bool otherBlock = false;
             foreach (SnakeRenderer other in allSnakes)
             {
@@ -168,22 +177,21 @@ public class SnakeRenderer : MonoBehaviour
             }
             if (otherBlock) break;
 
-            // Move is valid — insert new head position, remove tail
-            // This shifts the entire snake forward by one cell
+            // Valid move — insert new head, remove tail to slide forward
             cells.Insert(0, next);
             cells.RemoveAt(cells.Count - 1);
             current = next;
         }
 
-        // Rebuild visuals to match new cell positions
+        // Rebuild visuals to match new positions
         RenderSnake();
 
-        // Check if the snake has reached its exit hole after moving
+        // Check if head has reached the matching exit hole
         CheckExitReached();
     }
 
-    // Removes the head segment, effectively moving the snake backward
-    // Used for future retraction mechanic
+    // Removes the head segment — moves the snake backward one cell
+    // Used for the retraction mechanic
     public void Retract()
     {
         if (cells.Count <= 1) return;
@@ -191,11 +199,14 @@ public class SnakeRenderer : MonoBehaviour
         RenderSnake();
     }
 
-    // Checks whether the snake's head is now on its matching exit hole
-    // If it matches, the snake and exit hole are destroyed and GameManager
-    // is notified to check if all snakes have escaped (win condition)
+    // Checks whether the snake's head is on its matching exit hole
+    // If matched, destroys both snake and exit hole and notifies GameManager
     void CheckExitReached()
     {
+        // Find exit hole lazily — it may not exist when Start() runs
+        if (exitHole == null)
+            exitHole = FindAnyObjectByType<ExitHole>();
+
         if (exitHole == null) return;
 
         Vector2Int head = cells[0];
@@ -203,18 +214,14 @@ public class SnakeRenderer : MonoBehaviour
         if (head == exitHole.gridPosition && exitHole.MatchesSnake(snakeColour))
         {
             Debug.Log("Snake escaped!");
-
-            // Remove the exit hole and this snake from the scene
             Destroy(exitHole.gameObject);
             Destroy(this.gameObject);
-
-            // Tell GameManager to check if the level is complete
             gameManager.CheckWin();
         }
     }
 
     // Generates a minimal 1x1 white texture wrapped as a Sprite
-    // Colour is applied separately via SpriteRenderer.color
+    // Colour applied separately via SpriteRenderer.color
     Sprite CreateSquareSprite()
     {
         Texture2D tex = new Texture2D(1, 1);

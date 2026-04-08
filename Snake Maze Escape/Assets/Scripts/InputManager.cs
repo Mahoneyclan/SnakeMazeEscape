@@ -18,7 +18,7 @@ public class InputManager : MonoBehaviour
     // Unity calls Start() once when the scene begins
     void Start()
     {
-        gridManager = FindFirstObjectByType<GridManager>();
+        gridManager = FindAnyObjectByType<GridManager>();
     }
 
     // Unity calls Update() every frame
@@ -41,8 +41,8 @@ public class InputManager : MonoBehaviour
             new Vector3(mouseScreen.x, mouseScreen.y, 0));
 
         // Round to nearest integer to get grid cell coordinates
-        int x = Mathf.RoundToInt(worldPos.x);
-        int y = Mathf.RoundToInt(worldPos.y);
+        int x = Mathf.RoundToInt(worldPos.x / gridManager.cellSize);
+        int y = Mathf.RoundToInt(worldPos.y / gridManager.cellSize);
 
         // If the click landed outside the grid, deselect and stop
         if (!gridManager.IsInBounds(x, y))
@@ -60,19 +60,18 @@ public class InputManager : MonoBehaviour
 
         if (clickedSnake != null)
         {
-            // Player clicked a snake — select it
-            // Deselect any previously selected snake first
+            // Player clicked a snake — deselect previous and select new
             if (selectedSnake != null) Deselect();
             selectedSnake = clickedSnake;
             selectedSnake.SetSelected(true);
             return;
         }
 
-        // If no snake is selected, there is nothing else to do
+        // If no snake is selected there is nothing else to do
         if (selectedSnake == null) return;
 
         // A snake is selected and the player clicked an empty cell
-        // The target must be in the same row or column as the snake's head
+        // Target must be in the same row or column as the snake's head
         Vector2Int head = selectedSnake.GetHeadCell();
         bool sameRow = (y == head.y);
         bool sameCol = (x == head.x);
@@ -84,8 +83,8 @@ public class InputManager : MonoBehaviour
             return;
         }
 
-        // Valid target — move the snake along the line toward the clicked cell
-        // The snake will stop early if blocked by a wall, another snake, or the edge
+        // Valid target — move snake along the line toward the clicked cell
+        // Snake stops early if blocked by wall, another snake, or grid edge
         selectedSnake.MoveAlongLine(x, y, gridManager);
     }
 
@@ -103,7 +102,7 @@ public class InputManager : MonoBehaviour
     // Returns null if no snake is found at that position
     SnakeRenderer GetSnakeAtCell(int x, int y)
     {
-        SnakeRenderer[] allSnakes = FindObjectsByType<SnakeRenderer>(FindObjectsSortMode.None);
+        SnakeRenderer[] allSnakes = FindObjectsByType<SnakeRenderer>(FindObjectsInactive.Exclude);
         foreach (SnakeRenderer snake in allSnakes)
             if (snake.OccupiesCell(x, y)) return snake;
         return null;
