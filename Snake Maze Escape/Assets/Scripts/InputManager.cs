@@ -1,71 +1,95 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
+// InputManager handles all player input.
+// It detects mouse clicks, converts screen coordinates to grid coordinates,
+// determines whether the player clicked a snake or a target cell,
+// and delegates movement to the selected SnakeRenderer.
+// Only one snake can be selected at a time.
+
 public class InputManager : MonoBehaviour
 {
+    // Reference to GridManager for bounds checking and cell type queries
     private GridManager gridManager;
+
+    // The currently selected snake — null if none is selected
     private SnakeRenderer selectedSnake;
 
+    // Unity calls Start() once when the scene begins
     void Start()
     {
         gridManager = FindFirstObjectByType<GridManager>();
     }
 
+    // Unity calls Update() every frame
+    // We only act on the frame when the left mouse button is first pressed
     void Update()
     {
         if (Mouse.current.leftButton.wasPressedThisFrame)
             HandleClick();
     }
 
+    // Main click handler — called once per left mouse button press
+    // Converts the click to a grid position and decides what to do
     void HandleClick()
     {
+        // Read mouse position in screen pixels
         Vector2 mouseScreen = Mouse.current.position.ReadValue();
+
+        // Convert screen pixels to world space coordinates
         Vector3 worldPos = Camera.main.ScreenToWorldPoint(
             new Vector3(mouseScreen.x, mouseScreen.y, 0));
 
+        // Round to nearest integer to get grid cell coordinates
         int x = Mathf.RoundToInt(worldPos.x);
         int y = Mathf.RoundToInt(worldPos.y);
 
-        // Outside grid — deselect
+        // If the click landed outside the grid, deselect and stop
         if (!gridManager.IsInBounds(x, y))
         {
             Deselect();
             return;
         }
 
-        // Clicked a wall — ignore
+        // If the click landed on a wall, ignore it
         if (gridManager.GetCell(x, y) == GridManager.CellType.Wall)
             return;
 
-        // Clicked a snake — select it
+        // Check whether a snake occupies the clicked cell
         SnakeRenderer clickedSnake = GetSnakeAtCell(x, y);
+
         if (clickedSnake != null)
         {
+            // Player clicked a snake — select it
+            // Deselect any previously selected snake first
             if (selectedSnake != null) Deselect();
             selectedSnake = clickedSnake;
             selectedSnake.SetSelected(true);
             return;
         }
 
-        // No snake selected — nothing to do
+        // If no snake is selected, there is nothing else to do
         if (selectedSnake == null) return;
 
+        // A snake is selected and the player clicked an empty cell
+        // The target must be in the same row or column as the snake's head
         Vector2Int head = selectedSnake.GetHeadCell();
-
-        // Must be same row or same column
         bool sameRow = (y == head.y);
         bool sameCol = (x == head.x);
 
         if (!sameRow && !sameCol)
         {
+            // Diagonal or unaligned click — deselect the snake
             Deselect();
             return;
         }
 
-        // Move along the line
+        // Valid target — move the snake along the line toward the clicked cell
+        // The snake will stop early if blocked by a wall, another snake, or the edge
         selectedSnake.MoveAlongLine(x, y, gridManager);
     }
 
+    // Deselects the current snake and clears the reference
     void Deselect()
     {
         if (selectedSnake != null)
@@ -75,6 +99,8 @@ public class InputManager : MonoBehaviour
         }
     }
 
+    // Searches all active SnakeRenderers to find one occupying the given cell
+    // Returns null if no snake is found at that position
     SnakeRenderer GetSnakeAtCell(int x, int y)
     {
         SnakeRenderer[] allSnakes = FindObjectsByType<SnakeRenderer>(FindObjectsSortMode.None);
