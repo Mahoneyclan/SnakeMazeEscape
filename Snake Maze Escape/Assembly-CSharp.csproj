@@ -52,6 +52,7 @@
     <Compile Include="Assets/Scripts/GridManager.cs" />
     <Compile Include="Assets/Scripts/InputManager.cs" />
     <Compile Include="Assets/Scripts/SnakeRenderer.cs" />
+    <Compile Include="Assets/Scripts/ExitHole.cs" />
   </ItemGroup>
   <ItemGroup>
     <Reference Include="UnityEngine">
