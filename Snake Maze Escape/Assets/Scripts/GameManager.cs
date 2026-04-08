@@ -30,6 +30,7 @@ public class GameManager : MonoBehaviour
     private GridManager   gridManager;
     private LevelGenerator levelGenerator;
     private UIManager     uiManager;
+    private AudioManager  audioManager;
 
     // Derived from currentLevel — calculated in Start()
     private int difficultyTier; // 1-5
@@ -81,13 +82,20 @@ public class GameManager : MonoBehaviour
         }
         uiManager.Initialise(this);
 
-        // Find scene objects — auto-create LevelGenerator if missing from scene
+        // Find scene objects — auto-create missing managers
         gridManager    = FindAnyObjectByType<GridManager>();
         levelGenerator = FindAnyObjectByType<LevelGenerator>();
         if (levelGenerator == null)
         {
             GameObject lgObj = new GameObject("LevelGenerator");
             levelGenerator = lgObj.AddComponent<LevelGenerator>();
+        }
+
+        audioManager = FindAnyObjectByType<AudioManager>();
+        if (audioManager == null)
+        {
+            GameObject amObj = new GameObject("AudioManager");
+            audioManager = amObj.AddComponent<AudioManager>();
         }
 
         // Derive parameters for this level
@@ -244,6 +252,7 @@ public class GameManager : MonoBehaviour
     // Brief pause so the player can see the cleared board, then advances
     IEnumerator LevelCompleteSequence()
     {
+        audioManager?.PlayWin();
         uiManager.ShowWinPanel(currentLevel);
         yield return new WaitForSeconds(2f);
         NextLevel();

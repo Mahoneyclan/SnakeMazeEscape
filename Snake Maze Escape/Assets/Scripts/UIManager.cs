@@ -1,6 +1,7 @@
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
+using UnityEngine.InputSystem.UI;
 using TMPro;
 
 // UIManager builds all UI entirely in code — no prefabs or scene setup required.
@@ -68,10 +69,25 @@ public class UIManager : MonoBehaviour
 
     void EnsureEventSystem()
     {
-        if (FindAnyObjectByType<EventSystem>() != null) return;
-        new GameObject("EventSystem",
-            typeof(EventSystem),
-            typeof(StandaloneInputModule));
+        EventSystem es = FindAnyObjectByType<EventSystem>();
+
+        if (es == null)
+        {
+            // No EventSystem in scene — create one with the correct module
+            GameObject obj = new GameObject("EventSystem");
+            obj.AddComponent<EventSystem>();
+            obj.AddComponent<InputSystemUIInputModule>();
+            return;
+        }
+
+        // EventSystem exists — swap out StandaloneInputModule if present
+        StandaloneInputModule legacy = es.GetComponent<StandaloneInputModule>();
+        if (legacy != null)
+        {
+            Destroy(legacy);
+            if (es.GetComponent<InputSystemUIInputModule>() == null)
+                es.gameObject.AddComponent<InputSystemUIInputModule>();
+        }
     }
 
     void BuildCanvas()

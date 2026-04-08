@@ -1,99 +1,117 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 
-// InputManager handles all player input.
-// It detects mouse clicks, converts screen coordinates to grid coordinates,
-// determines whether the player clicked a snake or a target cell,
-// and delegates movement to the selected SnakeRenderer.
-// Only one snake can be selected at a time.
+// InputManager handles all player input via press/drag.
+// Works on both desktop (mouse) and mobile (touch) because it uses
+// Pointer.current — the Input System base class shared by Mouse and Touchscreen.
+// Press down on a snake to select it, then drag along its row or column
+// to slide it — the snake follows the pointer in real time.
+// Releasing the pointer finalises the position and deselects.
 
 public class InputManager : MonoBehaviour
 {
-    // Reference to GridManager for bounds checking and cell type queries
     private GridManager gridManager;
 
-    // The currently selected snake — null if none is selected
+    // Snake currently being dragged — null when no drag is active
     private SnakeRenderer selectedSnake;
 
-    // Unity calls Start() once when the scene begins
+    // Last grid cell the pointer occupied during this drag
+    private Vector2Int lastDragCell;
+
+    // True while the pointer is held after selecting a snake
+    private bool isDragging = false;
+
     void Start()
     {
         gridManager = FindAnyObjectByType<GridManager>();
     }
 
-    // Unity calls Update() every frame
-    // We only act on the frame when the left mouse button is first pressed
     void Update()
     {
-        if (Mouse.current.leftButton.wasPressedThisFrame)
-            HandleClick();
+        Pointer ptr = Pointer.current;
+        if (ptr == null) return;
+
+        if (ptr.press.wasPressedThisFrame)
+            HandlePressStart();
+        else if (isDragging && ptr.press.IsPressed())
+            HandleDrag();
+        else if (ptr.press.wasReleasedThisFrame)
+            HandleRelease();
     }
 
-    // Main click handler — called once per left mouse button press
-    // Converts the click to a grid position and decides what to do
-    void HandleClick()
+    // -------------------------------------------------------------------------
+    // Input phases
+    // -------------------------------------------------------------------------
+
+    // Called on the frame the pointer goes down
+    void HandlePressStart()
     {
-        // Read mouse position in screen pixels
-        Vector2 mouseScreen = Mouse.current.position.ReadValue();
+        Vector2Int cell = PointerToGrid();
 
-        // Convert screen pixels to world space coordinates
-        Vector3 worldPos = Camera.main.ScreenToWorldPoint(
-            new Vector3(mouseScreen.x, mouseScreen.y, 0));
-
-        // Round to nearest integer to get grid cell coordinates
-        int x = Mathf.RoundToInt(worldPos.x / gridManager.cellSize);
-        int y = Mathf.RoundToInt(worldPos.y / gridManager.cellSize);
-
-        // If the click landed outside the grid, deselect and stop
-        if (!gridManager.IsInBounds(x, y))
+        if (!gridManager.IsInBounds(cell.x, cell.y))
         {
             Deselect();
             return;
         }
 
-        // If the click landed on a wall, ignore it
-        if (gridManager.GetCell(x, y) == GridManager.CellType.Wall)
-            return;
-
-        // Check whether a snake occupies the clicked cell
-        SnakeRenderer clickedSnake = GetSnakeAtCell(x, y);
-
-        if (clickedSnake != null)
+        SnakeRenderer snake = GetSnakeAtCell(cell.x, cell.y);
+        if (snake == null)
         {
-            if (selectedSnake != null) Deselect();
-
-            // If the player tapped the tail, reverse the snake so the tail
-            // becomes the active head — both ends are moveable
-            if (clickedSnake.IsTailCell(x, y))
-                clickedSnake.SetActiveEndToTail();
-
-            selectedSnake = clickedSnake;
-            selectedSnake.SetSelected(true);
-            return;
-        }
-
-        // If no snake is selected there is nothing else to do
-        if (selectedSnake == null) return;
-
-        // A snake is selected and the player clicked an empty cell
-        // Target must be in the same row or column as the snake's head
-        Vector2Int head = selectedSnake.GetHeadCell();
-        bool sameRow = (y == head.y);
-        bool sameCol = (x == head.x);
-
-        if (!sameRow && !sameCol)
-        {
-            // Diagonal or unaligned click — deselect the snake
             Deselect();
             return;
         }
 
-        // Valid target — move snake along the line toward the clicked cell
-        // Snake stops early if blocked by wall, another snake, or grid edge
-        selectedSnake.MoveAlongLine(x, y, gridManager);
+        // Tapping the tail reverses the snake so the tail becomes the active head
+        if (snake.IsTailCell(cell.x, cell.y))
+            snake.SetActiveEndToTail();
+
+        if (selectedSnake != null) Deselect();
+        selectedSnake = snake;
+        selectedSnake.SetSelected(true);
+        lastDragCell = selectedSnake.GetHeadCell();
+        isDragging   = true;
     }
 
-    // Deselects the current snake and clears the reference
+    // Called every frame while the pointer is held and a snake is selected
+    void HandleDrag()
+    {
+        // Snake may have been destroyed (escaped exit) mid-drag
+        if (selectedSnake == null) { isDragging = false; return; }
+
+        Vector2Int cell = PointerToGrid();
+        if (cell == lastDragCell) return; // pointer hasn't crossed a cell boundary
+
+        Vector2Int head = selectedSnake.GetHeadCell();
+
+        // Only allow movement along the axis already aligned with the head
+        bool sameRow = (cell.y == head.y);
+        bool sameCol = (cell.x == head.x);
+        if (!sameRow && !sameCol) return;
+
+        if (!gridManager.IsInBounds(cell.x, cell.y)) return;
+        if (gridManager.GetCell(cell.x, cell.y) == GridManager.CellType.Wall) return;
+
+        selectedSnake.MoveAlongLine(cell.x, cell.y, gridManager);
+
+        // Update lastDragCell to the snake's actual head after the move
+        // (it may have stopped short of the pointer due to walls or other snakes)
+        if (selectedSnake != null)
+            lastDragCell = selectedSnake.GetHeadCell();
+        else
+            isDragging = false; // snake escaped — end drag
+    }
+
+    // Called on the frame the pointer is released
+    void HandleRelease()
+    {
+        isDragging = false;
+        Deselect();
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
     void Deselect()
     {
         if (selectedSnake != null)
@@ -103,13 +121,24 @@ public class InputManager : MonoBehaviour
         }
     }
 
-    // Searches all active SnakeRenderers to find one occupying the given cell
-    // Returns null if no snake is found at that position
+    // Converts the current pointer position to grid coordinates
+    Vector2Int PointerToGrid()
+    {
+        Vector2 screen  = Pointer.current.position.ReadValue();
+        Vector3 world   = Camera.main.ScreenToWorldPoint(
+            new Vector3(screen.x, screen.y, 0f));
+        int x = Mathf.RoundToInt(world.x / gridManager.cellSize);
+        int y = Mathf.RoundToInt(world.y / gridManager.cellSize);
+        return new Vector2Int(x, y);
+    }
+
+    // Returns the first SnakeRenderer that occupies the given cell, or null
     SnakeRenderer GetSnakeAtCell(int x, int y)
     {
-        SnakeRenderer[] allSnakes = FindObjectsByType<SnakeRenderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-        foreach (SnakeRenderer snake in allSnakes)
-            if (snake.OccupiesCell(x, y)) return snake;
+        SnakeRenderer[] all = FindObjectsByType<SnakeRenderer>(
+            FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        foreach (SnakeRenderer s in all)
+            if (s.OccupiesCell(x, y)) return s;
         return null;
     }
 }
