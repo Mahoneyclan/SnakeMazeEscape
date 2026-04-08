@@ -55,7 +55,6 @@ public class GridManager : MonoBehaviour
         {
             for (int y = 0; y < height; y++)
             {
-                // Create cell as a sprite
                 GameObject cell = new GameObject($"Cell_{x}_{y}");
                 cell.transform.parent = this.transform;
                 cell.transform.position = new Vector3(x * cellSize, y * cellSize, 0);
@@ -99,5 +98,10 @@ public class GridManager : MonoBehaviour
         if (x < 0 || x >= width || y < 0 || y >= height) return;
         grid[x, y] = type;
         cellRenderers[x, y].color = (type == CellType.Wall) ? wallColour : emptyColour;
+    }
+
+    public bool IsInBounds(int x, int y)
+    {
+        return x >= 0 && x < width && y >= 0 && y < height;
     }
 }
