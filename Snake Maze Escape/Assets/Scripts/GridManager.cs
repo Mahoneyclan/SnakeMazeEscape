@@ -1,5 +1,4 @@
 using UnityEngine;
-using System.Collections.Generic;
 
 // GridManager is responsible for the entire grid/maze structure.
 // It owns the grid data array, renders all cells as sprites,
@@ -7,7 +6,7 @@ using System.Collections.Generic;
 // change cell types at runtime.
 // Grid dimensions are set by difficulty tier via SetDifficulty()
 // and are never exposed in the Inspector — prevents manual override conflicts.
-// Grid is rectangular (taller than wide) to suit iPhone portrait layout.
+// Grid is square to match the reference game aesthetic.
 
 public class GridManager : MonoBehaviour
 {
@@ -37,42 +36,21 @@ public class GridManager : MonoBehaviour
     // so we can update colours at runtime without recreating objects
     private SpriteRenderer[,] cellRenderers;
 
-    // Hardcoded wall positions for testing at 10x14 grid scale
-    // These will be replaced by the level generator in Step 8
-    private List<Vector2Int> testWalls = new List<Vector2Int>
-    {
-        // Horizontal barrier across middle
-        new Vector2Int(2, 7),
-        new Vector2Int(3, 7),
-        new Vector2Int(4, 7),
-        new Vector2Int(5, 7),
-        // Vertical barrier on right
-        new Vector2Int(7, 4),
-        new Vector2Int(7, 5),
-        new Vector2Int(7, 6),
-        new Vector2Int(7, 7),
-        // Small cluster bottom left
-        new Vector2Int(2, 2),
-        new Vector2Int(3, 2),
-        new Vector2Int(2, 3),
-        // Small cluster top right
-        new Vector2Int(7, 10),
-        new Vector2Int(8, 10),
-        new Vector2Int(8, 11),
-    };
 
     // Sets grid dimensions based on difficulty tier
     // Must be called by GameManager before Awake() builds the grid
     public void SetDifficulty(int tier)
     {
+        // Square grids — match reference game aesthetic
+        // cellSize is uniform; camera auto-fits to screen width
         switch (tier)
         {
-            case 1: width = 8;  height = 12; cellSize = 0.5f; break; // Beginner
-            case 2: width = 9;  height = 13; cellSize = 0.5f; break; // Easy
-            case 3: width = 10; height = 14; cellSize = 0.5f; break; // Medium
-            case 4: width = 11; height = 15; cellSize = 0.5f; break; // Hard
-            case 5: width = 12; height = 16; cellSize = 0.5f; break; // Expert
-            default: width = 8; height = 12; cellSize = 0.5f; break; // Fallback
+            case 1: width =  8; height =  8; cellSize = 0.9f; break; // Beginner
+            case 2: width = 10; height = 10; cellSize = 0.9f; break; // Easy
+            case 3: width = 12; height = 12; cellSize = 0.9f; break; // Medium
+            case 4: width = 13; height = 13; cellSize = 0.9f; break; // Hard
+            case 5: width = 14; height = 14; cellSize = 0.9f; break; // Expert
+            default: width = 8; height =  8; cellSize = 0.9f; break; // Fallback
         }
     }
 
@@ -90,21 +68,15 @@ public class GridManager : MonoBehaviour
         CentreCamera();
     }
 
-    // Initialises the grid data array and applies wall positions
+    // Initialises the grid data array — all cells start empty
+    // Walls are added later by LevelGenerator
     void BuildGrid()
     {
         grid = new CellType[width, height];
 
-        // Default every cell to empty
         for (int x = 0; x < width; x++)
             for (int y = 0; y < height; y++)
                 grid[x, y] = CellType.Empty;
-
-        // Mark wall positions from the test list
-        // Only apply walls that fit within the current grid dimensions
-        foreach (Vector2Int wall in testWalls)
-            if (wall.x >= 0 && wall.x < width && wall.y >= 0 && wall.y < height)
-                grid[wall.x, wall.y] = CellType.Wall;
     }
 
     // Creates a SpriteRenderer GameObject for every cell in the grid
@@ -146,28 +118,36 @@ public class GridManager : MonoBehaviour
         return Sprite.Create(tex, new Rect(0, 0, 1, 1), new Vector2(0.5f, 0.5f), 1f);
     }
 
-    // Positions the orthographic camera to frame the full grid
-    // with padding on all sides — suits iPhone portrait layout
+    // Positions the orthographic camera to frame the square grid.
+    // On a portrait screen the grid is always width-constrained, so orthographic
+    // size is derived from the horizontal span. A small vertical offset shifts
+    // the grid downward to leave room for the HUD strip at the top.
     void CentreCamera()
     {
-        // Total world dimensions of the grid
-        float gridWorldWidth = (width - 1) * cellSize;
+        float gridWorldWidth  = (width  - 1) * cellSize;
         float gridWorldHeight = (height - 1) * cellSize;
 
-        // Centre camera over the grid
+        // Padding: 1.5 cells on every side
+        float pad = cellSize * 1.5f;
+
+        float screenAspect = (float)Screen.width / Screen.height;
+
+        // Half-height needed to show full grid width + padding
+        float sizeFromWidth  = (gridWorldWidth  / 2f + pad) / screenAspect;
+        // Half-height needed to show full grid height + padding
+        float sizeFromHeight = gridWorldHeight / 2f + pad;
+
+        float orthoSize = Mathf.Max(sizeFromWidth, sizeFromHeight);
+
+        // Shift grid centre down by 4% of the ortho height to give HUD space at top
+        float verticalOffset = orthoSize * 0.04f;
+
+        Camera.main.orthographicSize = orthoSize;
         Camera.main.transform.position = new Vector3(
-            gridWorldWidth / 2f,
-            gridWorldHeight / 2f,
+            gridWorldWidth  / 2f,
+            gridWorldHeight / 2f - verticalOffset,
             -10f
         );
-
-        // Add two cell widths of padding on each axis
-        float verticalSize = (gridWorldHeight / 2f) + (cellSize * 2f);
-        float screenAspect = (float)Screen.width / Screen.height;
-        float horizontalSize = ((gridWorldWidth / 2f) + (cellSize * 2f)) / screenAspect;
-
-        // Use whichever is larger to ensure full grid fits on screen
-        Camera.main.orthographicSize = Mathf.Max(verticalSize, horizontalSize);
     }
 
     // Returns the CellType at a given grid position
@@ -192,4 +172,19 @@ public class GridManager : MonoBehaviour
     {
         return x >= 0 && x < width && y >= 0 && y < height;
     }
+
+// Destroys all existing cell GameObjects and rebuilds the grid
+    // Called by GameManager after SetDifficulty() changes dimensions
+    public void RebuildGrid()
+    {
+        // Destroy all existing cell GameObjects
+        foreach (Transform child in this.transform)
+            Destroy(child.gameObject);
+
+        // Rebuild from scratch with new dimensions
+        BuildGrid();
+        RenderGrid();
+        CentreCamera();
+    }
+
 }

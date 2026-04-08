@@ -1,174 +1,253 @@
 using UnityEngine;
 using System.Collections.Generic;
 
-// SnakeRenderer manages everything about a single snake:
-// its position data, its visual segments on the grid,
-// selection state, movement logic, and win detection
-// when the snake's head reaches its matching exit hole.
-// Cell size is read from GridManager at startup so the snake
-// always scales correctly regardless of difficulty tier.
+// SnakeRenderer manages a single snake: position data, visuals, movement,
+// selection state, and win detection.
+//
+// Visual layers per segment (sortingOrder):
+//   1 — drop shadow  (slightly larger, semi-transparent, offset down-right)
+//   2 — body sprite  (head larger/lighter, body normal, tail smaller/darker)
+//
+// Both ends are moveable: clicking the tail reverses the cells list so the
+// tail becomes the active head, and movement proceeds from there.
 
 public class SnakeRenderer : MonoBehaviour
 {
     [Header("Snake Settings")]
-    public Color snakeColour = new Color(0.91f, 0.36f, 0.29f); // Coral red
+    public Color snakeColour = new Color(0.91f, 0.36f, 0.29f);
 
-    // Cell size read from GridManager at startup — never hardcoded
-    // Ensures snake segments always match the current grid scale
     private float cellSize;
 
-    // Ordered list of grid positions this snake occupies
-    // Index 0 is always the head, last index is the tail
+    // Index 0 = active head, last index = active tail
     private List<Vector2Int> cells = new List<Vector2Int>();
 
-    // Matching list of SpriteRenderers — one per segment
+    // Body SpriteRenderers only (not shadows) — used by UpdateSelectionVisual
     private List<SpriteRenderer> segmentRenderers = new List<SpriteRenderer>();
 
-    // Tracks whether this snake is currently selected by the player
-    private bool isSelected = false;
+    private bool isSelected  = false;
+    private bool initialised = false;
 
-    // References to other managers — set in Start()
     private GridManager gridManager;
     private GameManager gameManager;
-    private ExitHole exitHole;
 
-    // Hardcoded starting positions for testing
-    // Head at (0,0), body extending right
-    // Will be replaced by JSON level loader in Step 8
-    private List<Vector2Int> testSnakeCells = new List<Vector2Int>
-    {
-        new Vector2Int(0, 0), // head
-        new Vector2Int(1, 0),
-        new Vector2Int(2, 0), // tail
-    };
+    // -------------------------------------------------------------------------
+    // Initialisation
+    // -------------------------------------------------------------------------
 
-    // Unity calls Start() once when the scene begins
-    void Start()
+    public void Initialise(Color colour, Vector2Int startPos, int length,
+        GridManager gm, List<Vector2Int> occupiedCells = null)
     {
-        // Cache references to other scripts in the scene
-        gridManager = FindAnyObjectByType<GridManager>();
+        snakeColour = colour;
+        gridManager = gm;
         gameManager = FindAnyObjectByType<GameManager>();
-        exitHole = FindAnyObjectByType<ExitHole>();
+        cellSize    = gridManager.cellSize;
 
-        // Read cell size from GridManager so snake always matches grid scale
-        // This must happen before RenderSnake() uses cellSize
-        cellSize = gridManager.cellSize;
+        cells = BuildSnakeBody(startPos, length,
+            occupiedCells ?? new List<Vector2Int>());
 
-        // Initialise cell positions from test data
-        cells = new List<Vector2Int>(testSnakeCells);
-
-        // Draw the snake on screen
+        initialised = true;
         RenderSnake();
     }
 
-    // Destroys all existing segment GameObjects and rebuilds them
-    // from the current cells list. Called after every move.
+    // Tries all four directions; picks the first that fits without overlapping
+    List<Vector2Int> BuildSnakeBody(Vector2Int head, int length,
+        List<Vector2Int> occupiedCells)
+    {
+        Vector2Int[] directions = {
+            Vector2Int.right, Vector2Int.up,
+            Vector2Int.left,  Vector2Int.down
+        };
+
+        foreach (Vector2Int dir in directions)
+        {
+            Vector2Int next = head;
+            List<Vector2Int> attempt = new List<Vector2Int> { head };
+            bool blocked = false;
+
+            for (int i = 1; i < length; i++)
+            {
+                next += dir;
+                if (!gridManager.IsInBounds(next.x, next.y)) { blocked = true; break; }
+                if (occupiedCells.Contains(next))             { blocked = true; break; }
+                attempt.Add(next);
+            }
+
+            if (!blocked && attempt.Count == length)
+                return attempt;
+        }
+
+        // Fallback — stack at head (generator will handle any overlap)
+        List<Vector2Int> fallback = new List<Vector2Int>();
+        for (int i = 0; i < length; i++) fallback.Add(head);
+        return fallback;
+    }
+
+    void Start()
+    {
+        if (initialised) return;
+        gridManager = FindAnyObjectByType<GridManager>();
+        gameManager = FindAnyObjectByType<GameManager>();
+        cellSize    = gridManager.cellSize;
+        cells       = new List<Vector2Int> { Vector2Int.zero };
+        RenderSnake();
+    }
+
+    // -------------------------------------------------------------------------
+    // Rendering
+    // -------------------------------------------------------------------------
+
     void RenderSnake()
     {
-        // Destroy old segment GameObjects
-        foreach (SpriteRenderer sr in segmentRenderers)
-            if (sr != null) Destroy(sr.gameObject);
+        // Destroy all previous child GameObjects (segments + shadows)
+        for (int i = transform.childCount - 1; i >= 0; i--)
+            Destroy(transform.GetChild(i).gameObject);
         segmentRenderers.Clear();
 
-        // Create a new segment for each cell position
-        for (int i = 0; i < cells.Count; i++)
+        int last = cells.Count - 1;
+
+        for (int i = 0; i <= last; i++)
         {
-            Vector2Int pos = cells[i];
+            Vector3 worldPos = new Vector3(
+                cells[i].x * cellSize,
+                cells[i].y * cellSize,
+                -1f);
 
-            GameObject seg = new GameObject($"Segment_{i}");
-            seg.transform.parent = this.transform;
+            float segScale = SegmentScale(i, last);
 
-            // Z of -1 puts snake in front of grid cells (z=0)
-            seg.transform.position = new Vector3(
-                pos.x * cellSize, pos.y * cellSize, -1f);
+            // Drop shadow — slightly larger, dark, offset down-right
+            GameObject shadow    = new GameObject($"Shadow_{i}");
+            shadow.transform.SetParent(transform, false);
+            shadow.transform.position = worldPos + new Vector3(
+                cellSize * 0.07f, -cellSize * 0.07f, 0f);
+
+            SpriteRenderer shadowSr = shadow.AddComponent<SpriteRenderer>();
+            shadowSr.sprite       = CreateSquareSprite();
+            shadowSr.color        = new Color(0f, 0f, 0f, 0.28f);
+            shadowSr.sortingOrder = 1;
+            float shadowScale     = segScale * 1.18f;
+            shadow.transform.localScale = new Vector3(shadowScale, shadowScale, 1f);
+
+            // Body sprite
+            GameObject seg    = new GameObject($"Segment_{i}");
+            seg.transform.SetParent(transform, false);
+            seg.transform.position = worldPos;
 
             SpriteRenderer sr = seg.AddComponent<SpriteRenderer>();
-            sr.sprite = CreateSquareSprite();
-            sr.color = snakeColour;
-
-            // Segments slightly smaller than cells so grid lines show through
-            seg.transform.localScale = new Vector3(
-                cellSize * 0.8f, cellSize * 0.8f, 1f);
+            sr.sprite         = CreateSquareSprite();
+            sr.color          = SegmentBaseColour(i, last);
+            sr.sortingOrder   = 2;
+            seg.transform.localScale = new Vector3(segScale, segScale, 1f);
 
             segmentRenderers.Add(sr);
         }
 
-        // Apply selection highlight after rebuilding
         UpdateSelectionVisual();
     }
 
-    // Updates segment colours to reflect selection state
-    // When selected, the head segment lightens toward white
+    // Head is larger, tail is smaller, body uniform
+    float SegmentScale(int i, int last)
+    {
+        if (i == 0)    return cellSize * 0.88f; // head
+        if (i == last) return cellSize * 0.55f; // tail
+        return             cellSize * 0.80f;    // body
+    }
+
+    // Head slightly lighter, tail slightly darker, body normal
+    Color SegmentBaseColour(int i, int last)
+    {
+        if (i == 0)    return Color.Lerp(snakeColour, Color.white, 0.18f);
+        if (i == last) return Color.Lerp(snakeColour, Color.black, 0.25f);
+        return snakeColour;
+    }
+
     void UpdateSelectionVisual()
     {
+        int last = cells.Count - 1;
         for (int i = 0; i < segmentRenderers.Count; i++)
         {
             if (segmentRenderers[i] == null) continue;
 
             if (isSelected && i == 0)
-                // Blend head 50% toward white as selection indicator
-                segmentRenderers[i].color = Color.Lerp(snakeColour, Color.white, 0.5f);
+                // Active head: bright highlight
+                segmentRenderers[i].color = Color.Lerp(snakeColour, Color.white, 0.55f);
+            else if (isSelected && i == last)
+                // Inactive tail: soft highlight shows it is also tappable
+                segmentRenderers[i].color = Color.Lerp(snakeColour, Color.white, 0.30f);
             else
-                segmentRenderers[i].color = snakeColour;
+                segmentRenderers[i].color = SegmentBaseColour(i, last);
         }
     }
 
-    // Called by InputManager to select or deselect this snake
+    // -------------------------------------------------------------------------
+    // Public selection API
+    // -------------------------------------------------------------------------
+
     public void SetSelected(bool selected)
     {
         isSelected = selected;
         UpdateSelectionVisual();
     }
 
-    // Returns true if any part of this snake occupies the given cell
-    // Used by InputManager to detect which snake was clicked
-    public bool OccupiesCell(int x, int y)
+    // Reverses the cells list so the tail becomes the active head.
+    // Called by InputManager when the player taps the tail end.
+    public void SetActiveEndToTail()
     {
-        return cells.Contains(new Vector2Int(x, y));
+        cells.Reverse();
+        RenderSnake();
     }
 
-    // Returns the current head position (index 0 of cells list)
-    public Vector2Int GetHeadCell()
-    {
-        return cells[0];
-    }
+    public bool IsHeadCell(int x, int y) =>
+        cells.Count > 0 && cells[0] == new Vector2Int(x, y);
 
-    // Moves the snake in a straight line toward (targetX, targetY)
-    // stopping when it hits a wall, another snake, its own body,
-    // or the grid boundary. Snake slides automatically — player
-    // clicks the destination, not each individual cell.
-    public void MoveAlongLine(int targetX, int targetY, GridManager gridManager)
+    // IsTailCell is only true when the tail is a distinct cell from the head
+    public bool IsTailCell(int x, int y) =>
+        cells.Count > 1 && cells[cells.Count - 1] == new Vector2Int(x, y);
+
+    // -------------------------------------------------------------------------
+    // Public query API
+    // -------------------------------------------------------------------------
+
+    public bool OccupiesCell(int x, int y) =>
+        cells.Contains(new Vector2Int(x, y));
+
+    public List<Vector2Int> GetAllCells()  => new List<Vector2Int>(cells);
+    public Vector2Int       GetHeadCell()  => cells[0];
+    public Color            GetColour()    => snakeColour;
+
+    // -------------------------------------------------------------------------
+    // Movement
+    // -------------------------------------------------------------------------
+
+    public void MoveAlongLine(int targetX, int targetY, GridManager gm)
     {
         Vector2Int head = cells[0];
 
-        // Calculate step direction — horizontal OR vertical only, never diagonal
         int dx = 0, dy = 0;
         if (targetX != head.x) dx = (targetX > head.x) ? 1 : -1;
         if (targetY != head.y) dy = (targetY > head.y) ? 1 : -1;
 
         Vector2Int current = head;
 
-        // Step one cell at a time until blocked or target is reached
         while (true)
         {
             Vector2Int next = new Vector2Int(current.x + dx, current.y + dy);
 
-            // Stop if we have stepped past the target cell
+            // Stop if past target
             if (dx != 0 && ((dx > 0 && next.x > targetX) || (dx < 0 && next.x < targetX))) break;
             if (dy != 0 && ((dy > 0 && next.y > targetY) || (dy < 0 && next.y < targetY))) break;
 
-            // Stop at grid boundary or wall
-            if (!gridManager.IsInBounds(next.x, next.y)) break;
-            if (gridManager.GetCell(next.x, next.y) == GridManager.CellType.Wall) break;
+            if (!gm.IsInBounds(next.x, next.y)) break;
+            if (gm.GetCell(next.x, next.y) == GridManager.CellType.Wall) break;
 
-            // Stop at own body — exclude tail since it vacates this frame
+            // Stop at own body (tail vacates this frame so exclude it)
             bool selfBlock = false;
             for (int i = 0; i < cells.Count - 1; i++)
                 if (cells[i] == next) { selfBlock = true; break; }
             if (selfBlock) break;
 
             // Stop at other snakes
-            SnakeRenderer[] allSnakes = FindObjectsByType<SnakeRenderer>(FindObjectsInactive.Exclude);
+            SnakeRenderer[] allSnakes = FindObjectsByType<SnakeRenderer>(
+                FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             bool otherBlock = false;
             foreach (SnakeRenderer other in allSnakes)
             {
@@ -177,21 +256,15 @@ public class SnakeRenderer : MonoBehaviour
             }
             if (otherBlock) break;
 
-            // Valid move — insert new head, remove tail to slide forward
             cells.Insert(0, next);
             cells.RemoveAt(cells.Count - 1);
             current = next;
         }
 
-        // Rebuild visuals to match new positions
         RenderSnake();
-
-        // Check if head has reached the matching exit hole
         CheckExitReached();
     }
 
-    // Removes the head segment — moves the snake backward one cell
-    // Used for the retraction mechanic
     public void Retract()
     {
         if (cells.Count <= 1) return;
@@ -199,29 +272,28 @@ public class SnakeRenderer : MonoBehaviour
         RenderSnake();
     }
 
-    // Checks whether the snake's head is on its matching exit hole
-    // If matched, destroys both snake and exit hole and notifies GameManager
     void CheckExitReached()
     {
-        // Find exit hole lazily — it may not exist when Start() runs
-        if (exitHole == null)
-            exitHole = FindAnyObjectByType<ExitHole>();
+        ExitHole[] allExits = FindObjectsByType<ExitHole>(
+            FindObjectsInactive.Exclude, FindObjectsSortMode.None);
 
-        if (exitHole == null) return;
-
-        Vector2Int head = cells[0];
-
-        if (head == exitHole.gridPosition && exitHole.MatchesSnake(snakeColour))
+        foreach (ExitHole exit in allExits)
         {
+            if (!exit.MatchesSnake(snakeColour)) continue;
+            if (cells[0] != exit.gridPosition)   continue;
+
             Debug.Log("Snake escaped!");
-            Destroy(exitHole.gameObject);
+            Destroy(exit.gameObject);
             Destroy(this.gameObject);
             gameManager.CheckWin();
+            return;
         }
     }
 
-    // Generates a minimal 1x1 white texture wrapped as a Sprite
-    // Colour applied separately via SpriteRenderer.color
+    // -------------------------------------------------------------------------
+    // Helpers
+    // -------------------------------------------------------------------------
+
     Sprite CreateSquareSprite()
     {
         Texture2D tex = new Texture2D(1, 1);

@@ -1,102 +1,99 @@
 using UnityEngine;
+using System.Collections.Generic;
 
 // ExitHole represents the destination cell for a specific snake.
 // It renders as a coloured ring on the grid at a randomly chosen
-// interior cell position. It does not require manual configuration
-// in the Inspector — position is assigned automatically by
-// GameManager when the level is initialised.
-// Only the snake whose colour matches the exit hole can enter it.
+// interior cell. Position is assigned automatically by GameManager.
+// Only the snake whose colour matches can enter it —
+// all other snakes treat it as passable (exit holes don't block other snakes
+// at the grid data level — blocking is handled in SnakeRenderer).
 
 public class ExitHole : MonoBehaviour
 {
     [Header("Exit Hole Settings")]
-    // Colour must match the snake this exit belongs to exactly
-    // Set by GameManager.PlaceExitHole() at runtime
+    // Colour set by GameManager to match a specific snake
     public Color exitColour = new Color(0.91f, 0.36f, 0.29f);
 
-    // Grid position assigned automatically — not set in Inspector
+    // Grid position — assigned automatically, not set in Inspector
     public Vector2Int gridPosition { get; private set; }
 
-    // Must match GridManager.cellSize so positioning is consistent
-    public float cellSize = 1f;
+    // Cell size read from GridManager
+    private float cellSize;
 
-    // Reference to GridManager for bounds and cell type checking
-    private GridManager gridManager;
-
-    // The SpriteRenderer that draws the ring visual
+    // SpriteRenderer for the ring visual
     private SpriteRenderer sr;
 
-    // Unity calls Start() once when the scene begins
-    void Start()
-    {
-        // Nothing here — Initialise() is called externally by GameManager
-    }
+    // Unity calls Start() once — Initialise() is called externally instead
+    void Start() { }
 
-    // Called by GameManager after the exit hole is created
-    // Finds a random valid empty interior cell and places the hole there
-    public void Initialise(Color colour, GridManager gm)
+    // Called by GameManager to place and render this exit hole
+    // colour: must match the snake this exit belongs to
+    // gm: reference to GridManager for valid cell selection
+    // excludedPositions: cells already taken by other exits or snakes
+    public void Initialise(Color colour, GridManager gm,
+        List<Vector2Int> excludedPositions = null)
     {
         exitColour = colour;
-        gridManager = gm;
         cellSize = gm.cellSize;
 
-        // Pick a random valid grid position
-        gridPosition = PickRandomCell();
+        // Pick a random valid interior cell not in the excluded list
+        gridPosition = PickRandomCell(gm, excludedPositions ?? new List<Vector2Int>());
 
-        // Position in world space — Z of -0.5 sits between grid (0) and snakes (-1)
+        // Position in world space — Z -0.5 sits between grid (0) and snakes (-1)
         transform.position = new Vector3(
             gridPosition.x * cellSize,
             gridPosition.y * cellSize,
             -0.5f
         );
 
-        // Build and apply the ring visual
+        // Build and apply ring visual
+        // sortingOrder 2 keeps exit holes on top of snakes (0) and grid (0)
+        // so the ring is always visible even when a snake occupies the cell
         sr = gameObject.AddComponent<SpriteRenderer>();
-        sr.sprite = CreateCircleSprite();
-        sr.color = exitColour;
+        sr.sprite       = CreateCircleSprite();
+        sr.color        = exitColour;
+        sr.sortingOrder = 3;
 
-        // Scale ring to 70% of cell size so it sits visibly inside the cell
+        // 70% of cell size so ring sits visibly inside the cell
         transform.localScale = new Vector3(cellSize * 0.7f, cellSize * 0.7f, 1f);
 
-        Debug.Log($"Exit hole placed at ({gridPosition.x}, {gridPosition.y})");
+        Debug.Log($"Exit hole placed at {gridPosition}");
     }
 
-    // Finds a random empty interior cell that is not occupied by a wall
-    // Keeps trying until a valid cell is found
-    // Interior = not on the very edge row/column of the grid
-    Vector2Int PickRandomCell()
+    // Picks a random empty interior cell not in the excluded list
+    Vector2Int PickRandomCell(GridManager gm, List<Vector2Int> excluded)
     {
         Vector2Int candidate;
         int attempts = 0;
 
         do
         {
-            // Pick a random cell inside the grid boundary (not on outer edge)
-            int x = Random.Range(1, gridManager.width - 1);
-            int y = Random.Range(1, gridManager.height - 1);
+            int x = Random.Range(1, gm.width - 1);
+            int y = Random.Range(1, gm.height - 1);
             candidate = new Vector2Int(x, y);
             attempts++;
 
-            // Safety exit after 100 attempts to avoid infinite loop
-            if (attempts > 100)
+            if (attempts > 200)
             {
-                Debug.LogWarning("ExitHole: could not find valid cell after 100 attempts. Using fallback.");
-                candidate = new Vector2Int(gridManager.width - 2, gridManager.height - 2);
+                Debug.LogWarning("ExitHole: fallback position used");
+                candidate = new Vector2Int(gm.width - 2, gm.height - 2);
                 break;
             }
         }
-        // Keep trying if the cell is a wall or already has something on it
-        while (gridManager.GetCell(candidate.x, candidate.y) == GridManager.CellType.Wall);
+        while (excluded.Contains(candidate) ||
+               gm.GetCell(candidate.x, candidate.y) == GridManager.CellType.Wall);
 
         return candidate;
     }
 
     // Generates a circle ring texture procedurally
-    // Pixels between innerVoid and outerRing radius are filled; others transparent
+    // Ring is white — colour applied via SpriteRenderer.color
     Sprite CreateCircleSprite()
     {
         int size = 64;
-        Texture2D tex = new Texture2D(size, size);
+        // RGBA32 required — without it Unity 6 may drop the alpha channel,
+        // making Color.clear pixels render as opaque black
+        Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
         Vector2 centre = new Vector2(size / 2f, size / 2f);
         float radius = size / 2f;
 
@@ -108,6 +105,7 @@ public class ExitHole : MonoBehaviour
                 float outerRing = radius;
                 float innerVoid = radius * 0.55f;
 
+                // Pixel is part of ring if between inner and outer radius
                 if (dist <= outerRing && dist >= innerVoid)
                     tex.SetPixel(px, py, Color.white);
                 else
@@ -120,8 +118,7 @@ public class ExitHole : MonoBehaviour
             new Vector2(0.5f, 0.5f), size);
     }
 
-    // Called by SnakeRenderer.CheckExitReached() to verify colour match
-    // Uses Approximately() instead of == to avoid floating point mismatch
+    // Called by SnakeRenderer to verify colour match before allowing escape
     public bool MatchesSnake(Color snakeColour)
     {
         return Mathf.Approximately(exitColour.r, snakeColour.r) &&

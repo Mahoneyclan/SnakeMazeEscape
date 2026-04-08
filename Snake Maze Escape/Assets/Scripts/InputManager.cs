@@ -60,8 +60,13 @@ public class InputManager : MonoBehaviour
 
         if (clickedSnake != null)
         {
-            // Player clicked a snake — deselect previous and select new
             if (selectedSnake != null) Deselect();
+
+            // If the player tapped the tail, reverse the snake so the tail
+            // becomes the active head — both ends are moveable
+            if (clickedSnake.IsTailCell(x, y))
+                clickedSnake.SetActiveEndToTail();
+
             selectedSnake = clickedSnake;
             selectedSnake.SetSelected(true);
             return;
@@ -102,7 +107,7 @@ public class InputManager : MonoBehaviour
     // Returns null if no snake is found at that position
     SnakeRenderer GetSnakeAtCell(int x, int y)
     {
-        SnakeRenderer[] allSnakes = FindObjectsByType<SnakeRenderer>(FindObjectsInactive.Exclude);
+        SnakeRenderer[] allSnakes = FindObjectsByType<SnakeRenderer>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
         foreach (SnakeRenderer snake in allSnakes)
             if (snake.OccupiesCell(x, y)) return snake;
         return null;
