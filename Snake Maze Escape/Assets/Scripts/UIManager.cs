@@ -25,13 +25,21 @@ public class UIManager : MonoBehaviour
     private GameObject winPanel;
     private TextMeshProUGUI winLabel;
 
+    // Stored canvas references for late camera binding and panel rebuilding
+    private Transform canvasRoot;
+    private Canvas    uiCanvas;
+
     // -------------------------------------------------------------------------
     // Lifecycle
     // -------------------------------------------------------------------------
 
     void Awake()
     {
-        EnsureEventSystem();
+        try { EnsureEventSystem(); }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"[UIManager] EnsureEventSystem failed: {e.Message}");
+        }
         BuildCanvas();
     }
 
@@ -54,6 +62,19 @@ public class UIManager : MonoBehaviour
 
     public void ShowWinPanel(int levelJustCompleted)
     {
+        // winPanel can be destroyed if the scene is mid-reload — rebuild it
+        if (winPanel == null && canvasRoot != null)
+        {
+            winPanel = BuildWinPanel(canvasRoot);
+            winPanel.SetActive(false);
+        }
+
+        if (winPanel == null)
+        {
+            Debug.LogWarning("[UIManager] Cannot show win panel — canvas not ready");
+            return;
+        }
+
         bool lastLevel = levelJustCompleted >= 999;
 
         winLabel.text = lastLevel
@@ -90,29 +111,47 @@ public class UIManager : MonoBehaviour
         }
     }
 
+    // Stored canvas reference so we can bind the camera in Start()
     void BuildCanvas()
     {
-        // Root canvas
         GameObject canvasObj = new GameObject("UICanvas");
         canvasObj.transform.SetParent(transform, false);
 
-        Canvas canvas = canvasObj.AddComponent<Canvas>();
-        canvas.renderMode  = RenderMode.ScreenSpaceOverlay;
-        canvas.sortingOrder = 10;
+        // ScreenSpaceCamera is required for URP 2D renderer.
+        // ScreenSpaceOverlay is drawn before the URP 2D post-processing pass
+        // and gets overwritten, making it invisible. ScreenSpaceCamera renders
+        // after the scene and stays on top correctly.
+        uiCanvas = canvasObj.AddComponent<Canvas>();
+        uiCanvas.renderMode    = RenderMode.ScreenSpaceCamera;
+        uiCanvas.planeDistance = 1f;
+        uiCanvas.sortingOrder  = 100;
+        // Camera.main should be available since the Camera scene object's
+        // Awake() runs before UIManager.Awake() — bind it now if possible,
+        // otherwise fall back to Start().
+        if (Camera.main != null)
+            uiCanvas.worldCamera = Camera.main;
 
         CanvasScaler scaler = canvasObj.AddComponent<CanvasScaler>();
         scaler.uiScaleMode         = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(1080f, 1920f);
+        scaler.referenceResolution = new Vector2(750f, 1334f); // iOS Classic baseline
         scaler.matchWidthOrHeight  = 0.5f;
 
         canvasObj.AddComponent<GraphicRaycaster>();
 
         Transform root = canvasObj.transform;
+        canvasRoot = root;
 
         BuildHUD(root);
 
         winPanel = BuildWinPanel(root);
         winPanel.SetActive(false);
+    }
+
+    void Start()
+    {
+        // Fallback: bind the camera if it wasn't available during Awake()
+        if (uiCanvas != null && uiCanvas.worldCamera == null && Camera.main != null)
+            uiCanvas.worldCamera = Camera.main;
     }
 
     // -------------------------------------------------------------------------
@@ -121,11 +160,20 @@ public class UIManager : MonoBehaviour
 
     void BuildHUD(Transform root)
     {
+        // Dark background strip across the full top — guarantees text is readable
+        GameObject hudBg = NewRect("HUDBackground", root);
+        RectTransform hudBgRt = hudBg.GetComponent<RectTransform>();
+        hudBgRt.anchorMin = new Vector2(0f, 0.91f);
+        hudBgRt.anchorMax = new Vector2(1f, 1.00f);
+        hudBgRt.offsetMin = Vector2.zero;
+        hudBgRt.offsetMax = Vector2.zero;
+        hudBg.AddComponent<Image>().color = new Color(0.08f, 0.10f, 0.14f, 0.92f);
+
         // Level label — top-left of screen
         GameObject labelObj = NewRect("LevelLabel", root);
         RectTransform labelRt = labelObj.GetComponent<RectTransform>();
         labelRt.anchorMin = new Vector2(0f, 0.91f);
-        labelRt.anchorMax = new Vector2(0.65f, 1.00f);
+        labelRt.anchorMax = new Vector2(0.52f, 1.00f);
         labelRt.offsetMin = new Vector2(20f, 0f);
         labelRt.offsetMax = Vector2.zero;
 
@@ -136,11 +184,11 @@ public class UIManager : MonoBehaviour
         levelLabel.alignment  = TextAlignmentOptions.MidlineLeft;
         levelLabel.color      = Color.white;
 
-        // Replay button — top-right, always visible so player can reset any time
+        // Replay button — top-right, resets current level
         GameObject replayBtn = NewRect("HUDReplayBtn", root);
         RectTransform replayRt = replayBtn.GetComponent<RectTransform>();
-        replayRt.anchorMin = new Vector2(0.68f, 0.91f);
-        replayRt.anchorMax = new Vector2(0.97f, 0.99f);
+        replayRt.anchorMin = new Vector2(0.54f, 0.91f);
+        replayRt.anchorMax = new Vector2(0.76f, 0.99f);
         replayRt.offsetMin = Vector2.zero;
         replayRt.offsetMax = Vector2.zero;
 
@@ -159,6 +207,30 @@ public class UIManager : MonoBehaviour
         replayTmp.fontStyle = FontStyles.Bold;
         replayTmp.alignment = TextAlignmentOptions.Center;
         replayTmp.color     = Color.white;
+
+        // Reset to Level 1 button — top-far-right
+        GameObject resetBtn = NewRect("HUDResetBtn", root);
+        RectTransform resetRt = resetBtn.GetComponent<RectTransform>();
+        resetRt.anchorMin = new Vector2(0.78f, 0.91f);
+        resetRt.anchorMax = new Vector2(0.97f, 0.99f);
+        resetRt.offsetMin = Vector2.zero;
+        resetRt.offsetMax = Vector2.zero;
+
+        Image resetImg  = resetBtn.AddComponent<Image>();
+        resetImg.color  = new Color(0.55f, 0.20f, 0.20f, 0.90f);
+
+        Button resetButton = resetBtn.AddComponent<Button>();
+        resetButton.targetGraphic = resetImg;
+        resetButton.onClick.AddListener(() => gameManager.ResetAllProgress());
+
+        GameObject resetTextObj = NewRect("Label", resetBtn.transform);
+        Stretch(resetTextObj.GetComponent<RectTransform>());
+        TextMeshProUGUI resetTmp = resetTextObj.AddComponent<TextMeshProUGUI>();
+        resetTmp.text     = "↺ L1";
+        resetTmp.fontSize  = 38f;
+        resetTmp.fontStyle = FontStyles.Bold;
+        resetTmp.alignment = TextAlignmentOptions.Center;
+        resetTmp.color     = Color.white;
     }
 
     // -------------------------------------------------------------------------

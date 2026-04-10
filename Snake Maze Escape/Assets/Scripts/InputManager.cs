@@ -54,16 +54,13 @@ public class InputManager : MonoBehaviour
             return;
         }
 
-        SnakeRenderer snake = GetSnakeAtCell(cell.x, cell.y);
+        // Only select a snake by its head — body/tail taps do nothing
+        SnakeRenderer snake = GetSnakeAtHead(cell.x, cell.y);
         if (snake == null)
         {
             Deselect();
             return;
         }
-
-        // Tapping the tail reverses the snake so the tail becomes the active head
-        if (snake.IsTailCell(cell.x, cell.y))
-            snake.SetActiveEndToTail();
 
         if (selectedSnake != null) Deselect();
         selectedSnake = snake;
@@ -132,13 +129,13 @@ public class InputManager : MonoBehaviour
         return new Vector2Int(x, y);
     }
 
-    // Returns the first SnakeRenderer that occupies the given cell, or null
-    SnakeRenderer GetSnakeAtCell(int x, int y)
+    // Returns the SnakeRenderer whose HEAD is at the given cell, or null
+    SnakeRenderer GetSnakeAtHead(int x, int y)
     {
         SnakeRenderer[] all = FindObjectsByType<SnakeRenderer>(
             FindObjectsInactive.Exclude, FindObjectsSortMode.None);
         foreach (SnakeRenderer s in all)
-            if (s.OccupiesCell(x, y)) return s;
+            if (s.IsHeadCell(x, y)) return s;
         return null;
     }
 }

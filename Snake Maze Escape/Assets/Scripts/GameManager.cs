@@ -51,7 +51,10 @@ public class GameManager : MonoBehaviour
         }
         uiManager.Initialise(this);
 
-        gridManager    = FindAnyObjectByType<GridManager>();
+        gridManager = FindAnyObjectByType<GridManager>();
+        if (gridManager == null)
+            gridManager = new GameObject("GridManager").AddComponent<GridManager>();
+
         levelGenerator = FindAnyObjectByType<LevelGenerator>();
         if (levelGenerator == null)
             levelGenerator = new GameObject("LevelGenerator").AddComponent<LevelGenerator>();
@@ -124,7 +127,11 @@ public class GameManager : MonoBehaviour
     IEnumerator LevelCompleteSequence()
     {
         audioManager?.PlayWin();
-        uiManager.ShowWinPanel(currentLevel);
+        try { uiManager?.ShowWinPanel(currentLevel); }
+        catch (System.Exception e)
+        {
+            Debug.LogWarning($"[GameManager] ShowWinPanel failed: {e.Message}");
+        }
         yield return new WaitForSeconds(2f);
         NextLevel();
     }

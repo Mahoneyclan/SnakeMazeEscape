@@ -549,6 +549,9 @@ public class SnakeRenderer : MonoBehaviour
         psObj.transform.position = worldPos;
 
         ParticleSystem ps = psObj.AddComponent<ParticleSystem>();
+        // Stop immediately — AddComponent triggers playOnAwake by default,
+        // and Unity won't allow changing duration on a playing system.
+        ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
 
         var main           = ps.main;
         main.playOnAwake   = false;
