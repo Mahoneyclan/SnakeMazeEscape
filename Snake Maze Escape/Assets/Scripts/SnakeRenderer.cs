@@ -44,6 +44,33 @@ public class SnakeRenderer : MonoBehaviour
     // Initialisation
     // -------------------------------------------------------------------------
 
+    // Called by GameManager when LevelGenerator has pre-computed the full body.
+    // Skips BuildSnakeBody entirely — uses the supplied cells directly.
+    public void InitialiseWithBody(Color colour, List<Vector2Int> body, GridManager gm)
+    {
+        snakeColour  = colour;
+        gridManager  = gm;
+        gameManager  = FindAnyObjectByType<GameManager>();
+        audioManager = FindAnyObjectByType<AudioManager>();
+        cellSize     = gridManager.cellSize;
+
+        cells = new List<Vector2Int>(body);
+
+        visualPositions.Clear();
+        foreach (Vector2Int c in cells)
+            visualPositions.Add(CellToWorld(c));
+
+        if (cells.Count >= 2)
+        {
+            Vector2Int d = cells[0] - cells[1];
+            if (d != Vector2Int.zero)
+                lastHeadDir = new Vector2(d.x, d.y).normalized;
+        }
+
+        initialised = true;
+        SpawnVisuals();
+    }
+
     public void Initialise(Color colour, Vector2Int startPos, int length,
         GridManager gm, List<Vector2Int> occupiedCells = null)
     {

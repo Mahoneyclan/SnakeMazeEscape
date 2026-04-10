@@ -54,7 +54,7 @@ public class UIManager : MonoBehaviour
 
     public void ShowWinPanel(int levelJustCompleted)
     {
-        bool lastLevel = levelJustCompleted >= 25;
+        bool lastLevel = levelJustCompleted >= 999;
 
         winLabel.text = lastLevel
             ? "You Win!\nAll Levels Complete!"

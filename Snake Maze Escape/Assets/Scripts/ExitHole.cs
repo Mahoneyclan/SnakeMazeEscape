@@ -118,6 +118,27 @@ public class ExitHole : MonoBehaviour
             new Vector2(0.5f, 0.5f), size);
     }
 
+    // Called by GameManager when the generator has pre-computed the position.
+    // Renders identically to Initialise() but skips random cell selection.
+    public void InitialiseAt(Color colour, Vector2Int position, GridManager gm)
+    {
+        exitColour   = colour;
+        cellSize     = gm.cellSize;
+        gridPosition = position;
+
+        transform.position = new Vector3(
+            gridPosition.x * cellSize,
+            gridPosition.y * cellSize,
+            -0.5f);
+
+        sr              = gameObject.AddComponent<SpriteRenderer>();
+        sr.sprite       = CreateCircleSprite();
+        sr.color        = exitColour;
+        sr.sortingOrder = 3;
+
+        transform.localScale = new Vector3(cellSize * 0.7f, cellSize * 0.7f, 1f);
+    }
+
     // Called by SnakeRenderer to verify colour match before allowing escape
     public bool MatchesSnake(Color snakeColour)
     {

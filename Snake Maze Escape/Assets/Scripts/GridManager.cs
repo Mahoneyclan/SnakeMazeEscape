@@ -37,8 +37,15 @@ public class GridManager : MonoBehaviour
     private SpriteRenderer[,] cellRenderers;
 
 
-    // Sets grid dimensions based on difficulty tier
-    // Must be called by GameManager before Awake() builds the grid
+    // Sets grid dimensions directly — used by the 999-level system
+    public void SetSize(int w, int h)
+    {
+        width    = Mathf.Max(4, w);
+        height   = Mathf.Max(4, h);
+        cellSize = 0.9f;
+    }
+
+    // Sets grid dimensions based on difficulty tier (kept for compatibility)
     public void SetDifficulty(int tier)
     {
         // Square grids — match reference game aesthetic
