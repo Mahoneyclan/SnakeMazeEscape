@@ -71,96 +71,6 @@ public class SnakeRenderer : MonoBehaviour
         SpawnVisuals();
     }
 
-    public void Initialise(Color colour, Vector2Int startPos, int length,
-        GridManager gm, List<Vector2Int> occupiedCells = null)
-    {
-        snakeColour  = colour;
-        gridManager  = gm;
-        gameManager  = FindAnyObjectByType<GameManager>();
-        audioManager = FindAnyObjectByType<AudioManager>();
-        cellSize     = gridManager.cellSize;
-
-        cells = BuildSnakeBody(startPos, length,
-            occupiedCells ?? new List<Vector2Int>());
-
-        visualPositions.Clear();
-        foreach (Vector2Int c in cells)
-            visualPositions.Add(CellToWorld(c));
-
-        // Seed initial head direction from body layout
-        if (cells.Count >= 2)
-        {
-            Vector2Int d = cells[0] - cells[1];
-            if (d != Vector2Int.zero)
-                lastHeadDir = new Vector2(d.x, d.y).normalized;
-        }
-
-        initialised = true;
-        SpawnVisuals();
-    }
-
-    List<Vector2Int> BuildSnakeBody(Vector2Int head, int length,
-        List<Vector2Int> occupied)
-    {
-        Vector2Int[] dirs = {
-            Vector2Int.right, Vector2Int.up,
-            Vector2Int.left,  Vector2Int.down
-        };
-
-        foreach (Vector2Int dir in dirs)
-        {
-            List<Vector2Int> attempt = new List<Vector2Int> { head };
-            Vector2Int next = head;
-            bool blocked = false;
-
-            for (int i = 1; i < length; i++)
-            {
-                next += dir;
-                if (!gridManager.IsInBounds(next.x, next.y)) { blocked = true; break; }
-                if (occupied.Contains(next))                  { blocked = true; break; }
-                attempt.Add(next);
-            }
-
-            if (!blocked) return attempt;
-        }
-
-        List<Vector2Int> winding = new List<Vector2Int> { head };
-        if (BuildWindingPath(winding, length, occupied))
-            return winding;
-
-        Debug.LogWarning($"SnakeRenderer: no room for snake of length {length} at {head}");
-        List<Vector2Int> fallback = new List<Vector2Int>();
-        for (int i = 0; i < length; i++) fallback.Add(head);
-        return fallback;
-    }
-
-    bool BuildWindingPath(List<Vector2Int> body, int targetLength,
-        List<Vector2Int> occupied)
-    {
-        if (body.Count == targetLength) return true;
-
-        Vector2Int[] dirs = {
-            Vector2Int.right, Vector2Int.up,
-            Vector2Int.left,  Vector2Int.down
-        };
-
-        Vector2Int tip = body[body.Count - 1];
-
-        foreach (Vector2Int dir in dirs)
-        {
-            Vector2Int next = tip + dir;
-            if (!gridManager.IsInBounds(next.x, next.y)) continue;
-            if (occupied.Contains(next))                  continue;
-            if (body.Contains(next))                      continue;
-
-            body.Add(next);
-            if (BuildWindingPath(body, targetLength, occupied)) return true;
-            body.RemoveAt(body.Count - 1);
-        }
-
-        return false;
-    }
-
     void Start()
     {
         if (initialised) return;
@@ -430,14 +340,6 @@ public class SnakeRenderer : MonoBehaviour
         ApplyBodyGradient();
     }
 
-    public void SetActiveEndToTail()
-    {
-        cells.Reverse();
-        visualPositions.Reverse();
-        lastHeadDir = -lastHeadDir;
-        ApplyBodyGradient();
-    }
-
     public bool IsHeadCell(int x, int y) =>
         cells.Count > 0 && cells[0] == new Vector2Int(x, y);
 
@@ -470,6 +372,10 @@ public class SnakeRenderer : MonoBehaviour
         Vector2Int current = head;
         bool moved = false;
 
+        // Cache once before the loop — avoids a scene scan per cell moved
+        SnakeRenderer[] allSnakes = FindObjectsByType<SnakeRenderer>(
+            FindObjectsInactive.Exclude);
+
         while (true)
         {
             Vector2Int next = new Vector2Int(current.x + dx, current.y + dy);
@@ -485,8 +391,6 @@ public class SnakeRenderer : MonoBehaviour
                 if (cells[i] == next) { selfBlock = true; break; }
             if (selfBlock) break;
 
-            SnakeRenderer[] allSnakes = FindObjectsByType<SnakeRenderer>(
-                FindObjectsInactive.Exclude, FindObjectsSortMode.None);
             bool otherBlock = false;
             foreach (SnakeRenderer other in allSnakes)
             {
@@ -509,19 +413,10 @@ public class SnakeRenderer : MonoBehaviour
         CheckExitReached();
     }
 
-    public void Retract()
-    {
-        if (cells.Count <= 1) return;
-        cells.RemoveAt(0);
-        visualPositions.RemoveAt(0);
-        if (bodyLR)   bodyLR.positionCount   = cells.Count;
-        if (shadowLR) shadowLR.positionCount = cells.Count;
-    }
-
     void CheckExitReached()
     {
         ExitHole[] allExits = FindObjectsByType<ExitHole>(
-            FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+            FindObjectsInactive.Exclude);
 
         foreach (ExitHole exit in allExits)
         {

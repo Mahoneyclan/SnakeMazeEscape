@@ -1,107 +1,112 @@
+// AD INTEGRATION NOTE:
+// Banner ad zone is reserved at bottom 12% of screen (anchorMin.y=0, anchorMax.y=0.12)
+// To add Google AdMob:
+//   1. Import Google Mobile Ads Unity Plugin from:
+//      https://github.com/googleads/googleads-mobile-unity/releases
+//   2. Replace the BannerAdZone placeholder Image with AdMob banner
+//   3. Add interstitial ad call in GameManager.NextLevel() before scene reload
+//   4. iOS requires ATT permission prompt — add via iOS post-process build script
+// Interstitial: call between levels in GameManager.NextLevel()
+// Show every 3-5 levels to avoid user fatigue
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem.UI;
 using TMPro;
 
-// UIManager builds all UI entirely in code — no prefabs or scene setup required.
-// Uses TextMeshProUGUI for reliable text rendering in Unity 6.
-//
-// HUD (always visible):
-//   Top-centre: "Level X" label
-//
-// Win panel (shown on level complete):
-//   Dark overlay, centred card, level-complete text, Next Level + Replay buttons
-
+[DefaultExecutionOrder(-20)]
 public class UIManager : MonoBehaviour
 {
-    // Set by GameManager before the win panel can be shown
-    private GameManager gameManager;
+    private GameManager         gameManager;
+    private TextMeshProUGUI     levelLabel;
+    private GameObject          winPanel;
+    private TextMeshProUGUI     winLabel;
+    private Canvas              uiCanvas;
+    private TMP_FontAsset       defaultFont;
 
-    // HUD elements
-    private TextMeshProUGUI levelLabel;
-
-    // Win panel root — toggled when all snakes escape
-    private GameObject winPanel;
-    private TextMeshProUGUI winLabel;
-
-    // Stored canvas references for late camera binding and panel rebuilding
-    private Transform canvasRoot;
-    private Canvas    uiCanvas;
+    public bool IsReady => uiCanvas != null && winPanel != null && levelLabel != null;
 
     // -------------------------------------------------------------------------
-    // Lifecycle
+    // Lifecycle — canvas built once in Awake, never rebuilt
     // -------------------------------------------------------------------------
 
     void Awake()
     {
-        try { EnsureEventSystem(); }
-        catch (System.Exception e)
-        {
-            Debug.LogWarning($"[UIManager] EnsureEventSystem failed: {e.Message}");
-        }
+        defaultFont = LoadFont();
+        EnsureEventSystem();
         BuildCanvas();
+        Debug.Log($"[UIManager] Awake complete — IsReady={IsReady}");
     }
 
-    // Called by GameManager immediately after finding/creating this component
+    // -------------------------------------------------------------------------
+    // Public API
+    // -------------------------------------------------------------------------
+
     public void Initialise(GameManager gm)
     {
-        gameManager = gm;
+        gameManager        = gm;
+        levelLabel.text    = $"Level {gm.currentLevel}";
+        Debug.Log($"[UIManager] Initialise — Level {gm.currentLevel}");
     }
 
-    // Updates the HUD level counter — called by GameManager after level loads
     public void SetLevelLabel(int level)
     {
-        if (levelLabel != null)
-            levelLabel.text = $"Level {level}";
+        levelLabel.text = $"Level {level}";
+        Debug.Log($"[UIManager] SetLevelLabel({level})");
     }
-
-    // -------------------------------------------------------------------------
-    // Public win panel API
-    // -------------------------------------------------------------------------
 
     public void ShowWinPanel(int levelJustCompleted)
     {
-        // winPanel can be destroyed if the scene is mid-reload — rebuild it
-        if (winPanel == null && canvasRoot != null)
-        {
-            winPanel = BuildWinPanel(canvasRoot);
-            winPanel.SetActive(false);
-        }
-
         if (winPanel == null)
         {
-            Debug.LogWarning("[UIManager] Cannot show win panel — canvas not ready");
+            Debug.LogError("[UIManager] ShowWinPanel — winPanel is null");
             return;
         }
 
-        bool lastLevel = levelJustCompleted >= 999;
-
-        winLabel.text = lastLevel
-            ? "You Win!\nAll Levels Complete!"
+        winLabel.text = levelJustCompleted >= 999
+            ? "You Win!\nAll 999 Levels Complete!"
             : $"Level {levelJustCompleted}\nComplete!";
 
         winPanel.SetActive(true);
+        Debug.Log($"[UIManager] ShowWinPanel({levelJustCompleted}) — shown");
     }
 
     // -------------------------------------------------------------------------
-    // Canvas construction
+    // Font loading
+    // -------------------------------------------------------------------------
+
+    TMP_FontAsset LoadFont()
+    {
+        TMP_FontAsset font = Resources.Load<TMP_FontAsset>(
+            "Fonts & Materials/LiberationSans SDF");
+
+        if (font == null)
+        {
+            TMP_FontAsset[] all = Resources.FindObjectsOfTypeAll<TMP_FontAsset>();
+            if (all.Length > 0) font = all[0];
+        }
+
+        if (font == null)
+            Debug.LogError("[UIManager] No TMP font — " +
+                "Window > TextMeshPro > Import TMP Essential Resources");
+
+        return font;
+    }
+
+    // -------------------------------------------------------------------------
+    // Event system
     // -------------------------------------------------------------------------
 
     void EnsureEventSystem()
     {
         EventSystem es = FindAnyObjectByType<EventSystem>();
-
         if (es == null)
         {
-            // No EventSystem in scene — create one with the correct module
             GameObject obj = new GameObject("EventSystem");
             obj.AddComponent<EventSystem>();
             obj.AddComponent<InputSystemUIInputModule>();
             return;
         }
-
-        // EventSystem exists — swap out StandaloneInputModule if present
         StandaloneInputModule legacy = es.GetComponent<StandaloneInputModule>();
         if (legacy != null)
         {
@@ -111,126 +116,123 @@ public class UIManager : MonoBehaviour
         }
     }
 
-    // Stored canvas reference so we can bind the camera in Start()
+    // -------------------------------------------------------------------------
+    // Canvas — built once in Awake, never destroyed or rebuilt
+    // -------------------------------------------------------------------------
+
     void BuildCanvas()
     {
         GameObject canvasObj = new GameObject("UICanvas");
         canvasObj.transform.SetParent(transform, false);
 
-        // ScreenSpaceCamera is required for URP 2D renderer.
-        // ScreenSpaceOverlay is drawn before the URP 2D post-processing pass
-        // and gets overwritten, making it invisible. ScreenSpaceCamera renders
-        // after the scene and stays on top correctly.
-        uiCanvas = canvasObj.AddComponent<Canvas>();
-        uiCanvas.renderMode    = RenderMode.ScreenSpaceCamera;
-        uiCanvas.planeDistance = 1f;
-        uiCanvas.sortingOrder  = 100;
-        // Camera.main should be available since the Camera scene object's
-        // Awake() runs before UIManager.Awake() — bind it now if possible,
-        // otherwise fall back to Start().
-        if (Camera.main != null)
-            uiCanvas.worldCamera = Camera.main;
+        uiCanvas              = canvasObj.AddComponent<Canvas>();
+        uiCanvas.renderMode   = RenderMode.ScreenSpaceOverlay;
+        uiCanvas.sortingOrder = 999;
 
-        CanvasScaler scaler = canvasObj.AddComponent<CanvasScaler>();
+        CanvasScaler scaler        = canvasObj.AddComponent<CanvasScaler>();
         scaler.uiScaleMode         = CanvasScaler.ScaleMode.ScaleWithScreenSize;
-        scaler.referenceResolution = new Vector2(750f, 1334f); // iOS Classic baseline
+        scaler.referenceResolution = new Vector2(750f, 1334f);
         scaler.matchWidthOrHeight  = 0.5f;
 
         canvasObj.AddComponent<GraphicRaycaster>();
 
         Transform root = canvasObj.transform;
-        canvasRoot = root;
-
         BuildHUD(root);
-
         winPanel = BuildWinPanel(root);
         winPanel.SetActive(false);
     }
 
-    void Start()
-    {
-        // Fallback: bind the camera if it wasn't available during Awake()
-        if (uiCanvas != null && uiCanvas.worldCamera == null && Camera.main != null)
-            uiCanvas.worldCamera = Camera.main;
-    }
-
     // -------------------------------------------------------------------------
-    // HUD — always visible
+    // HUD
     // -------------------------------------------------------------------------
 
     void BuildHUD(Transform root)
     {
-        // Dark background strip across the full top — guarantees text is readable
-        GameObject hudBg = NewRect("HUDBackground", root);
-        RectTransform hudBgRt = hudBg.GetComponent<RectTransform>();
-        hudBgRt.anchorMin = new Vector2(0f, 0.91f);
-        hudBgRt.anchorMax = new Vector2(1f, 1.00f);
-        hudBgRt.offsetMin = Vector2.zero;
-        hudBgRt.offsetMax = Vector2.zero;
-        hudBg.AddComponent<Image>().color = new Color(0.08f, 0.10f, 0.14f, 0.92f);
+        // Dark strip — top 8% of screen
+        GameObject hudBg   = NewRect("HUDBackground", root);
+        RectTransform bgRt = hudBg.GetComponent<RectTransform>();
+        bgRt.anchorMin = new Vector2(0f, 0.92f);
+        bgRt.anchorMax = new Vector2(1f, 1.00f);
+        bgRt.offsetMin = Vector2.zero;
+        bgRt.offsetMax = Vector2.zero;
+        Image hudImg         = hudBg.AddComponent<Image>();
+        hudImg.color         = new Color(0.08f, 0.10f, 0.14f, 1f);
+        hudImg.raycastTarget = false;
 
-        // Level label — top-left of screen
-        GameObject labelObj = NewRect("LevelLabel", root);
+        // Level label — left half of HUD strip
+        GameObject labelObj   = NewRect("LevelLabel", root);
         RectTransform labelRt = labelObj.GetComponent<RectTransform>();
-        labelRt.anchorMin = new Vector2(0f, 0.91f);
-        labelRt.anchorMax = new Vector2(0.52f, 1.00f);
-        labelRt.offsetMin = new Vector2(20f, 0f);
+        labelRt.anchorMin = new Vector2(0.02f, 0.92f);
+        labelRt.anchorMax = new Vector2(0.50f, 1.00f);
+        labelRt.offsetMin = Vector2.zero;
         labelRt.offsetMax = Vector2.zero;
+        levelLabel               = MakeTMP(labelObj);
+        levelLabel.text          = "Level 1";
+        levelLabel.fontSize      = 34f;
+        levelLabel.fontStyle     = FontStyles.Bold;
+        levelLabel.alignment     = TextAlignmentOptions.MidlineLeft;
+        levelLabel.color         = Color.white;
+        levelLabel.raycastTarget = false;
 
-        levelLabel = labelObj.AddComponent<TextMeshProUGUI>();
-        levelLabel.text      = "Level 1";
-        levelLabel.fontSize   = 58f;
-        levelLabel.fontStyle  = FontStyles.Bold;
-        levelLabel.alignment  = TextAlignmentOptions.MidlineLeft;
-        levelLabel.color      = Color.white;
+        // Replay button
+        MakeHUDButton(root, "Replay",
+            new Vector2(0.52f, 0.925f), new Vector2(0.74f, 0.995f),
+            new Color(0.25f, 0.28f, 0.35f, 1f), 24f,
+            () => gameManager?.ResetLevel());
 
-        // Replay button — top-right, resets current level
-        GameObject replayBtn = NewRect("HUDReplayBtn", root);
-        RectTransform replayRt = replayBtn.GetComponent<RectTransform>();
-        replayRt.anchorMin = new Vector2(0.54f, 0.91f);
-        replayRt.anchorMax = new Vector2(0.76f, 0.99f);
-        replayRt.offsetMin = Vector2.zero;
-        replayRt.offsetMax = Vector2.zero;
+        // Reset button
+        MakeHUDButton(root, "Reset",
+            new Vector2(0.76f, 0.925f), new Vector2(0.98f, 0.995f),
+            new Color(0.55f, 0.20f, 0.20f, 1f), 22f,
+            () => gameManager?.ResetAllProgress());
 
-        Image replayImg  = replayBtn.AddComponent<Image>();
-        replayImg.color  = new Color(0.25f, 0.25f, 0.30f, 0.90f);
+        // Dark strip — bottom 12% reserved for banner ad
+        GameObject adBg   = NewRect("BannerAdZone", root);
+        RectTransform adRt = adBg.GetComponent<RectTransform>();
+        adRt.anchorMin = new Vector2(0f, 0.00f);
+        adRt.anchorMax = new Vector2(1f, 0.12f);
+        adRt.offsetMin = Vector2.zero;
+        adRt.offsetMax = Vector2.zero;
+        Image adImg         = adBg.AddComponent<Image>();
+        adImg.color         = new Color(0.08f, 0.08f, 0.10f, 1f);
+        adImg.raycastTarget = false;
 
-        Button replayButton = replayBtn.AddComponent<Button>();
-        replayButton.targetGraphic = replayImg;
-        replayButton.onClick.AddListener(() => gameManager.ResetLevel());
+        GameObject adLabel = NewRect("AdPlaceholder", adBg.transform);
+        Stretch(adLabel.GetComponent<RectTransform>());
+        TextMeshProUGUI adTmp = MakeTMP(adLabel);
+        adTmp.text           = "ADVERTISEMENT";
+        adTmp.fontSize       = 18f;
+        adTmp.alignment      = TextAlignmentOptions.Center;
+        adTmp.color          = new Color(0.4f, 0.4f, 0.4f, 1f);
+        adTmp.raycastTarget  = false;
+    }
 
-        GameObject replayTextObj = NewRect("Label", replayBtn.transform);
-        Stretch(replayTextObj.GetComponent<RectTransform>());
-        TextMeshProUGUI replayTmp = replayTextObj.AddComponent<TextMeshProUGUI>();
-        replayTmp.text     = "Replay";
-        replayTmp.fontSize  = 42f;
-        replayTmp.fontStyle = FontStyles.Bold;
-        replayTmp.alignment = TextAlignmentOptions.Center;
-        replayTmp.color     = Color.white;
+    void MakeHUDButton(Transform root, string label,
+        Vector2 anchorMin, Vector2 anchorMax,
+        Color colour, float fontSize,
+        UnityEngine.Events.UnityAction onClick)
+    {
+        GameObject btn    = NewRect(label + "Btn", root);
+        RectTransform rt  = btn.GetComponent<RectTransform>();
+        rt.anchorMin = anchorMin;
+        rt.anchorMax = anchorMax;
+        rt.offsetMin = Vector2.zero;
+        rt.offsetMax = Vector2.zero;
 
-        // Reset to Level 1 button — top-far-right
-        GameObject resetBtn = NewRect("HUDResetBtn", root);
-        RectTransform resetRt = resetBtn.GetComponent<RectTransform>();
-        resetRt.anchorMin = new Vector2(0.78f, 0.91f);
-        resetRt.anchorMax = new Vector2(0.97f, 0.99f);
-        resetRt.offsetMin = Vector2.zero;
-        resetRt.offsetMax = Vector2.zero;
+        Image img        = btn.AddComponent<Image>();
+        img.color        = colour;
+        Button button    = btn.AddComponent<Button>();
+        button.targetGraphic = img;
+        button.onClick.AddListener(onClick);
 
-        Image resetImg  = resetBtn.AddComponent<Image>();
-        resetImg.color  = new Color(0.55f, 0.20f, 0.20f, 0.90f);
-
-        Button resetButton = resetBtn.AddComponent<Button>();
-        resetButton.targetGraphic = resetImg;
-        resetButton.onClick.AddListener(() => gameManager.ResetAllProgress());
-
-        GameObject resetTextObj = NewRect("Label", resetBtn.transform);
-        Stretch(resetTextObj.GetComponent<RectTransform>());
-        TextMeshProUGUI resetTmp = resetTextObj.AddComponent<TextMeshProUGUI>();
-        resetTmp.text     = "↺ L1";
-        resetTmp.fontSize  = 38f;
-        resetTmp.fontStyle = FontStyles.Bold;
-        resetTmp.alignment = TextAlignmentOptions.Center;
-        resetTmp.color     = Color.white;
+        GameObject textObj = NewRect("Label", btn.transform);
+        Stretch(textObj.GetComponent<RectTransform>());
+        TextMeshProUGUI tmp = MakeTMP(textObj);
+        tmp.text      = label;
+        tmp.fontSize  = fontSize;
+        tmp.fontStyle = FontStyles.Bold;
+        tmp.alignment = TextAlignmentOptions.Center;
+        tmp.color     = Color.white;
     }
 
     // -------------------------------------------------------------------------
@@ -242,64 +244,67 @@ public class UIManager : MonoBehaviour
         // Full-screen dark overlay
         GameObject panel = NewRect("WinPanel", root);
         Stretch(panel.GetComponent<RectTransform>());
-        panel.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.80f);
+        panel.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.82f);
 
-        // Centred card — fixed size in reference pixels
-        GameObject card = NewRect("Card", panel.transform);
+        // Centred card
+        GameObject card    = NewRect("Card", panel.transform);
         RectTransform cardRt = card.GetComponent<RectTransform>();
         cardRt.anchorMin        = new Vector2(0.5f, 0.5f);
         cardRt.anchorMax        = new Vector2(0.5f, 0.5f);
         cardRt.pivot            = new Vector2(0.5f, 0.5f);
-        cardRt.sizeDelta        = new Vector2(700f, 500f);
+        cardRt.sizeDelta        = new Vector2(650f, 480f);
         cardRt.anchoredPosition = Vector2.zero;
-        card.AddComponent<Image>().color = new Vector4(0.10f, 0.10f, 0.13f, 1f);
+        card.AddComponent<Image>().color = new Color(0.10f, 0.10f, 0.13f, 1f);
 
-        // Win text — top 60% of card, using stretch anchors
-        GameObject textObj = NewRect("WinText", card.transform);
+        // Win text — top 60% of card
+        GameObject textObj   = NewRect("WinText", card.transform);
         RectTransform textRt = textObj.GetComponent<RectTransform>();
-        textRt.anchorMin = new Vector2(0.05f, 0.38f);
+        textRt.anchorMin = new Vector2(0.05f, 0.40f);
         textRt.anchorMax = new Vector2(0.95f, 0.95f);
         textRt.offsetMin = Vector2.zero;
         textRt.offsetMax = Vector2.zero;
-
-        winLabel = textObj.AddComponent<TextMeshProUGUI>();
+        winLabel           = MakeTMP(textObj);
         winLabel.text      = "Level Complete!";
-        winLabel.fontSize   = 64f;
-        winLabel.fontStyle  = FontStyles.Bold;
-        winLabel.alignment  = TextAlignmentOptions.Center;
-        winLabel.color      = Color.white;
+        winLabel.fontSize  = 58f;
+        winLabel.fontStyle = FontStyles.Bold;
+        winLabel.alignment = TextAlignmentOptions.Center;
+        winLabel.color     = Color.white;
 
-        // Replay button — bottom 28% of card, using stretch anchors
-        // Stretch anchors are more reliable than pixel offsets across resolutions
-        GameObject btn = NewRect("ReplayBtn", card.transform);
+        // Next Level button — bottom 25% of card
+        GameObject btn    = NewRect("NextBtn", card.transform);
         RectTransform btnRt = btn.GetComponent<RectTransform>();
-        btnRt.anchorMin = new Vector2(0.15f, 0.06f);
-        btnRt.anchorMax = new Vector2(0.85f, 0.28f);
+        btnRt.anchorMin = new Vector2(0.12f, 0.06f);
+        btnRt.anchorMax = new Vector2(0.88f, 0.30f);
         btnRt.offsetMin = Vector2.zero;
         btnRt.offsetMax = Vector2.zero;
-
-        Image btnImg   = btn.AddComponent<Image>();
-        btnImg.color   = new Color(0.29f, 0.56f, 0.85f);
-
-        Button button  = btn.AddComponent<Button>();
+        Image btnImg         = btn.AddComponent<Image>();
+        btnImg.color         = new Color(0.29f, 0.56f, 0.85f);
+        Button button        = btn.AddComponent<Button>();
         button.targetGraphic = btnImg;
-        button.onClick.AddListener(() => gameManager.ResetLevel());
+        button.onClick.AddListener(() => gameManager?.NextLevel());
 
         GameObject btnTextObj = NewRect("Label", btn.transform);
         Stretch(btnTextObj.GetComponent<RectTransform>());
-        TextMeshProUGUI btnTmp = btnTextObj.AddComponent<TextMeshProUGUI>();
-        btnTmp.text      = "Replay";
-        btnTmp.fontSize   = 52f;
-        btnTmp.fontStyle  = FontStyles.Bold;
-        btnTmp.alignment  = TextAlignmentOptions.Center;
-        btnTmp.color      = Color.white;
+        TextMeshProUGUI btnTmp = MakeTMP(btnTextObj);
+        btnTmp.text      = "Next Level";
+        btnTmp.fontSize  = 46f;
+        btnTmp.fontStyle = FontStyles.Bold;
+        btnTmp.alignment = TextAlignmentOptions.Center;
+        btnTmp.color     = Color.white;
 
         return panel;
     }
 
     // -------------------------------------------------------------------------
-    // Widget helpers
+    // Helpers
     // -------------------------------------------------------------------------
+
+    TextMeshProUGUI MakeTMP(GameObject obj)
+    {
+        TextMeshProUGUI tmp = obj.AddComponent<TextMeshProUGUI>();
+        if (defaultFont != null) tmp.font = defaultFont;
+        return tmp;
+    }
 
     GameObject NewRect(string name, Transform parent)
     {
@@ -315,46 +320,5 @@ public class UIManager : MonoBehaviour
         rt.anchorMax = Vector2.one;
         rt.offsetMin = Vector2.zero;
         rt.offsetMax = Vector2.zero;
-    }
-
-    // anchorPos: offset in pixels from the centre of the parent card
-    GameObject MakeButton(Transform parent, string labelText,
-        Vector2 anchorPos, Vector2 size, Color colour,
-        UnityEngine.Events.UnityAction onClick)
-    {
-        GameObject btn = NewRect(labelText + "Btn", parent);
-        RectTransform rt = btn.GetComponent<RectTransform>();
-        rt.anchorMin        = new Vector2(0.5f, 0.5f);
-        rt.anchorMax        = new Vector2(0.5f, 0.5f);
-        rt.pivot            = new Vector2(0.5f, 0.5f);
-        rt.sizeDelta        = size;
-        rt.anchoredPosition = anchorPos;
-
-        Image img = btn.AddComponent<Image>();
-        img.color = colour;
-
-        Button button = btn.AddComponent<Button>();
-        button.targetGraphic = img;
-
-        ColorBlock cb = button.colors;
-        cb.highlightedColor = Color.Lerp(colour, Color.white, 0.2f);
-        cb.pressedColor     = Color.Lerp(colour, Color.black, 0.2f);
-        button.colors       = cb;
-
-        button.onClick.AddListener(onClick);
-
-        // Text label inside button
-        GameObject textObj = NewRect("Label", btn.transform);
-        RectTransform textRt = textObj.GetComponent<RectTransform>();
-        Stretch(textRt);
-
-        TextMeshProUGUI tmp = textObj.AddComponent<TextMeshProUGUI>();
-        tmp.text      = labelText;
-        tmp.fontSize   = 44f;
-        tmp.fontStyle  = FontStyles.Bold;
-        tmp.alignment  = TextAlignmentOptions.Center;
-        tmp.color      = Color.white;
-
-        return btn;
     }
 }

@@ -4,27 +4,22 @@ using UnityEngine;
 // It owns the grid data array, renders all cells as sprites,
 // and provides public methods so other scripts can query or
 // change cell types at runtime.
-// Grid dimensions are set by difficulty tier via SetDifficulty()
-// and are never exposed in the Inspector — prevents manual override conflicts.
+// Grid dimensions are set by GameManager via SetSize() before RebuildGrid().
 // Grid is square to match the reference game aesthetic.
 
+[DefaultExecutionOrder(-10)]
 public class GridManager : MonoBehaviour
 {
-    // Grid dimensions are hidden from Inspector — controlled by SetDifficulty()
+    // Grid dimensions — set by GameManager via SetSize() before RebuildGrid().
     // HideInInspector keeps them public (accessible by other scripts)
-    // but removes them from the Unity Inspector panel
+    // but removes them from the Unity Inspector panel.
     [HideInInspector] public int width;
     [HideInInspector] public int height;
     [HideInInspector] public float cellSize;
 
     [Header("Visuals")]
-    public Color emptyColour = new Color(1f, 1f, 1f);
-    public Color wallColour = new Color(0.18f, 0.18f, 0.18f);
-
-    // Camera padding — adds breathing room so grid doesn't touch screen edges
-    [Header("Camera")]
-    public float cameraPaddingX = 0.15f; // 15% padding left and right
-    public float cameraPaddingY = 0.10f; // 10% padding top and bottom
+    public Color emptyColour = new Color(0.13f, 0.15f, 0.20f); // dark blue-grey cells
+    public Color wallColour  = new Color(0.06f, 0.06f, 0.08f); // near-black walls
 
     // Defines what each cell in the grid can be
     public enum CellType { Empty, Wall }
@@ -42,36 +37,24 @@ public class GridManager : MonoBehaviour
     {
         width    = Mathf.Max(4, w);
         height   = Mathf.Max(4, h);
-        cellSize = 0.9f;
+        cellSize = 0.4f;
     }
 
-    // Sets grid dimensions based on difficulty tier (kept for compatibility)
-    public void SetDifficulty(int tier)
+    // Awake() sets default dimensions only — BuildGrid/RenderGrid are
+    // deferred to RebuildGrid(), which GameManager always calls in Start().
+    // CentreCamera() is also in Start() as a safety fallback.
+    void Awake()
     {
-        // Square grids — match reference game aesthetic
-        // cellSize is uniform; camera auto-fits to screen width
-        switch (tier)
+        if (width == 0 || height == 0)
         {
-            case 1: width =  8; height =  8; cellSize = 0.9f; break; // Beginner
-            case 2: width = 10; height = 10; cellSize = 0.9f; break; // Easy
-            case 3: width = 12; height = 12; cellSize = 0.9f; break; // Medium
-            case 4: width = 13; height = 13; cellSize = 0.9f; break; // Hard
-            case 5: width = 14; height = 14; cellSize = 0.9f; break; // Expert
-            default: width = 8; height =  8; cellSize = 0.9f; break; // Fallback
+            width    = 8;
+            height   = 8;
+            cellSize = 0.4f;
         }
     }
 
-    // Awake() runs before Start() on all other scripts
-    // Guarantees the grid is fully built before GameManager
-    // tries to place snakes and exit holes in its Start()
-    void Awake()
+    void Start()
     {
-        // Default to tier 1 if SetDifficulty() was never called
-        if (width == 0 || height == 0)
-            SetDifficulty(1);
-
-        BuildGrid();
-        RenderGrid();
         CentreCamera();
     }
 
@@ -106,9 +89,10 @@ public class GridManager : MonoBehaviour
                 sr.sprite = CreateSquareSprite();
                 sr.color = (grid[x, y] == CellType.Wall) ? wallColour : emptyColour;
 
-                // Slight gap between cells creates visible grid lines
+                // Gap between cells creates visible grid lines
+                // 0.88 gives a 12% gap — visible at small cellSize (0.4f)
                 cell.transform.localScale = new Vector3(
-                    cellSize * 0.95f, cellSize * 0.95f, 1f);
+                    cellSize * 0.88f, cellSize * 0.88f, 1f);
 
                 cellRenderers[x, y] = sr;
             }
@@ -125,36 +109,45 @@ public class GridManager : MonoBehaviour
         return Sprite.Create(tex, new Rect(0, 0, 1, 1), new Vector2(0.5f, 0.5f), 1f);
     }
 
-    // Positions the orthographic camera to frame the square grid.
-    // On a portrait screen the grid is always width-constrained, so orthographic
-    // size is derived from the horizontal span. A small vertical offset shifts
-    // the grid downward to leave room for the HUD strip at the top.
     void CentreCamera()
     {
+        if (Camera.main == null) return;
+
         float gridWorldWidth  = (width  - 1) * cellSize;
         float gridWorldHeight = (height - 1) * cellSize;
 
-        // Padding: 1.5 cells on every side
-        float pad = cellSize * 1.5f;
+        float pad = cellSize * 1.2f;
 
         float screenAspect = (float)Screen.width / Screen.height;
+        if (screenAspect <= 0.01f) screenAspect = 0.5625f;
 
-        // Half-height needed to show full grid width + padding
+        // The grid zone is 80% of screen height (top 8% = HUD, bottom 12% = ad)
+        // Scale orthographic size to fit grid within this 80% zone
+        float zoneScale = 1f / 0.80f;
+
         float sizeFromWidth  = (gridWorldWidth  / 2f + pad) / screenAspect;
-        // Half-height needed to show full grid height + padding
-        float sizeFromHeight = gridWorldHeight / 2f + pad;
+        float sizeFromHeight = (gridWorldHeight / 2f + pad) * zoneScale;
 
         float orthoSize = Mathf.Max(sizeFromWidth, sizeFromHeight);
 
-        // Shift grid centre down by 4% of the ortho height to give HUD space at top
-        float verticalOffset = orthoSize * 0.04f;
+        // Shift camera DOWN to centre within the 80% zone
+        // HUD takes top 8% so shift down by 4% of ortho height
+        // Ad takes bottom 12% so shift up by 6% of ortho height
+        // Net: shift up by 2% to centre in the middle zone
+        float verticalShift = orthoSize * 0.02f;
 
-        Camera.main.orthographicSize = orthoSize;
+        Camera.main.backgroundColor    = new Color(0.12f, 0.12f, 0.16f);
+        Camera.main.orthographicSize   = orthoSize;
         Camera.main.transform.position = new Vector3(
             gridWorldWidth  / 2f,
-            gridWorldHeight / 2f - verticalOffset,
+            gridWorldHeight / 2f + verticalShift,
             -10f
         );
+
+        Debug.Log($"[GridManager] CentreCamera — " +
+                  $"grid={gridWorldWidth:F2}x{gridWorldHeight:F2} " +
+                  $"ortho={orthoSize:F2} aspect={screenAspect:F2} " +
+                  $"zone=80%");
     }
 
     // Returns the CellType at a given grid position
@@ -180,15 +173,13 @@ public class GridManager : MonoBehaviour
         return x >= 0 && x < width && y >= 0 && y < height;
     }
 
-// Destroys all existing cell GameObjects and rebuilds the grid
-    // Called by GameManager after SetDifficulty() changes dimensions
+    // Destroys all existing cell GameObjects and rebuilds the grid.
+    // Called from GameManager.Start() after screen dims are valid.
     public void RebuildGrid()
     {
-        // Destroy all existing cell GameObjects
         foreach (Transform child in this.transform)
             Destroy(child.gameObject);
 
-        // Rebuild from scratch with new dimensions
         BuildGrid();
         RenderGrid();
         CentreCamera();

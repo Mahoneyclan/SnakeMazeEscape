@@ -8,6 +8,7 @@ using System.Collections.Generic;
 // computed continuously from the level number via LevelGenerator.CalculateParams().
 // Level progress is persisted across sessions via PlayerPrefs.
 
+[DefaultExecutionOrder(20)]
 public class GameManager : MonoBehaviour
 {
     private const string LevelKey  = "SnakeMaze_Level";
@@ -48,6 +49,7 @@ public class GameManager : MonoBehaviour
         if (uiManager == null)
         {
             uiManager = new GameObject("UIManager").AddComponent<UIManager>();
+            Debug.LogWarning("[GameManager] UIManager not in scene — created");
         }
         uiManager.Initialise(this);
 
@@ -96,8 +98,6 @@ public class GameManager : MonoBehaviour
             exitHole.InitialiseAt(SnakeColours[i], gen.exitPositions[i], gridManager);
         }
 
-        uiManager.SetLevelLabel(currentLevel);
-
         Debug.Log($"[GameManager] Level {currentLevel} — World {p.world}, " +
                   $"{gen.snakeHeads.Count} snake(s), {p.snakeLength}-cell bodies");
 
@@ -127,12 +127,13 @@ public class GameManager : MonoBehaviour
     IEnumerator LevelCompleteSequence()
     {
         audioManager?.PlayWin();
-        try { uiManager?.ShowWinPanel(currentLevel); }
-        catch (System.Exception e)
-        {
-            Debug.LogWarning($"[GameManager] ShowWinPanel failed: {e.Message}");
-        }
-        yield return new WaitForSeconds(2f);
+
+        yield return null;
+        yield return null;
+
+        uiManager?.ShowWinPanel(currentLevel);
+
+        yield return new WaitForSeconds(2.5f);
         NextLevel();
     }
 

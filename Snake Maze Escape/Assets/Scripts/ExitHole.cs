@@ -23,69 +23,6 @@ public class ExitHole : MonoBehaviour
     // SpriteRenderer for the ring visual
     private SpriteRenderer sr;
 
-    // Unity calls Start() once — Initialise() is called externally instead
-    void Start() { }
-
-    // Called by GameManager to place and render this exit hole
-    // colour: must match the snake this exit belongs to
-    // gm: reference to GridManager for valid cell selection
-    // excludedPositions: cells already taken by other exits or snakes
-    public void Initialise(Color colour, GridManager gm,
-        List<Vector2Int> excludedPositions = null)
-    {
-        exitColour = colour;
-        cellSize = gm.cellSize;
-
-        // Pick a random valid interior cell not in the excluded list
-        gridPosition = PickRandomCell(gm, excludedPositions ?? new List<Vector2Int>());
-
-        // Position in world space — Z -0.5 sits between grid (0) and snakes (-1)
-        transform.position = new Vector3(
-            gridPosition.x * cellSize,
-            gridPosition.y * cellSize,
-            -0.5f
-        );
-
-        // Build and apply ring visual
-        // sortingOrder 2 keeps exit holes on top of snakes (0) and grid (0)
-        // so the ring is always visible even when a snake occupies the cell
-        sr = gameObject.AddComponent<SpriteRenderer>();
-        sr.sprite       = CreateCircleSprite();
-        sr.color        = exitColour;
-        sr.sortingOrder = 3;
-
-        // 70% of cell size so ring sits visibly inside the cell
-        transform.localScale = new Vector3(cellSize * 0.7f, cellSize * 0.7f, 1f);
-
-        Debug.Log($"Exit hole placed at {gridPosition}");
-    }
-
-    // Picks a random empty interior cell not in the excluded list
-    Vector2Int PickRandomCell(GridManager gm, List<Vector2Int> excluded)
-    {
-        Vector2Int candidate;
-        int attempts = 0;
-
-        do
-        {
-            int x = Random.Range(1, gm.width - 1);
-            int y = Random.Range(1, gm.height - 1);
-            candidate = new Vector2Int(x, y);
-            attempts++;
-
-            if (attempts > 200)
-            {
-                Debug.LogWarning("ExitHole: fallback position used");
-                candidate = new Vector2Int(gm.width - 2, gm.height - 2);
-                break;
-            }
-        }
-        while (excluded.Contains(candidate) ||
-               gm.GetCell(candidate.x, candidate.y) == GridManager.CellType.Wall);
-
-        return candidate;
-    }
-
     // Generates a circle ring texture procedurally
     // Ring is white — colour applied via SpriteRenderer.color
     Sprite CreateCircleSprite()
