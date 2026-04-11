@@ -7,3 +7,16 @@
 [Uu]ser[Ss]ettings/
 *.DS_Store
 .vscode/
+
+# Unity generated project files
+*.csproj
+*.sln
+
+# Package lock (auto-generated, not needed in source control)
+[Pp]ackages/packages-lock.json
+
+# Unity package manager cache
+[Pp]roject[Ss]ettings/[Pp]ackages/
+
+# TextMesh Pro example assets (not part of the game)
+[Aa]ssets/TextMesh Pro/Examples & Extras/
